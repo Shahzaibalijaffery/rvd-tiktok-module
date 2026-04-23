@@ -1,0 +1,88 @@
+{
+    "name": "@addoncrop/rvd-tiktok-module",
+    "type": "module",
+    "version": "1.0.0",
+    "license": "UNLICENSED",
+    "repository": {
+        "url": "https://github.com/Addoncrop/rvd-tiktok-module"
+    },
+    "exports": {
+        "./background": {
+            "import": {
+                "types": "./dist/background.d.ts",
+                "default": "./dist/background.js"
+            }
+        },
+        "./content": {
+            "import": {
+                "types": "./dist/content.d.ts",
+                "default": "./dist/content.js"
+            }
+        },
+        "./popup": {
+            "import": {
+                "types": "./dist/popup.d.ts",
+                "default": "./dist/popup.js"
+            }
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "watch:extension": "tsx build.extension.ts --development --watch",
+        "build:extension": "tsx build.extension.ts",
+        "watch:lib": "tsx build.lib.ts --development --watch",
+        "build:lib": "tsx build.lib.ts",
+        "lint": "eslint 'src/**/*.{ts,tsx}' --fix",
+        "typecheck": "tsc --build --noEmit"
+    },
+    "devDependencies": {
+        "@addoncrop/ffmpeg-helper": "^1.0.3",
+        "@addoncrop/m3u8-downloader": "^1.1.0",
+        "@antfu/eslint-config": "^8.0.0",
+        "@radix-ui/react-dropdown-menu": "^2.1.16",
+        "@radix-ui/react-tabs": "^1.1.13",
+        "@radix-ui/react-tooltip": "^1.2.8",
+        "@tailwindcss/node": "^4.2.2",
+        "@tailwindcss/postcss": "^4.2.2",
+        "@tailwindcss/vite": "^4.2.2",
+        "@types/chrome": "^0.1.39",
+        "@types/node": "^25.5.0",
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
+        "@types/serviceworker": "^0.0.194",
+        "@vitejs/plugin-react": "^6.0.1",
+        "axios": "^1.14.0",
+        "clsx": "^2.1.1",
+        "embla-carousel-react": "^8.6.0",
+        "eslint": "^10.1.0",
+        "eslint-plugin-format": "^2.0.1",
+        "filenamify": "^7.0.1",
+        "immer": "^11.1.4",
+        "jiti": "^2.6.1",
+        "lucide-react": "^1.7.0",
+        "postcss": "^8.5.8",
+        "postcss-load-config": "^6.0.1",
+        "radix-ui": "^1.4.3",
+        "react": "^19.2.4",
+        "react-dom": "^19.2.4",
+        "redom": "^4.3.0",
+        "sonner": "^2.0.7",
+        "tailwind-merge": "^3.5.0",
+        "tailwindcss": "^4.2.2",
+        "ts-extras": "^0.19.0",
+        "tsx": "^4.21.0",
+        "tw-animate-css": "^1.4.0",
+        "typescript": "^6.0.2",
+        "uuid": "^13.0.0",
+        "vite": "^8.0.3",
+        "vite-bundle-analyzer": "^1.3.6",
+        "vite-plugin-dts": "^4.5.4",
+        "zustand": "^5.0.12"
+    },
+    "publishConfig": {
+        "registry": "https://npm.pkg.github.com"
+    },
+    "packageManager": "pnpm@9.15.4+sha512.b2dc20e2fc72b3e18848459b37359a32064663e5627a51e4c74b2c29dd8e8e0491483c3abb40789cfd578bf362fb6ba8261b05f0387d76792ed6e23ea3b1b6a0"
+}

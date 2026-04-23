@@ -1,0 +1,126 @@
+{
+    "popup_ext_name": {
+        "message": "TikTok Video Downloader",
+        "description": "Extension name in popup header and loader"
+    },
+    "popup_ext_by": {
+        "message": "by Addoncrop",
+        "description": "Attribution line under extension name"
+    },
+    "loader_formerly": {
+        "message": "formerly YouTube Video Downloader",
+        "description": "Subtitle on loader screen"
+    },
+    "loader_description": {
+        "message": "Now supports 1000+ websites for fast and secure downloads.",
+        "description": "Loader screen tagline"
+    },
+    "loader_loading_video": {
+        "message": "Loading video information...",
+        "description": "Loader primary status text"
+    },
+    "loader_wait_for_downloads": {
+        "message": "Please wait while we find available downloads",
+        "description": "Loader secondary status text"
+    },
+    "popup_about_badge": {
+        "message": "FREE",
+        "description": "Badge on about header"
+    },
+    "ext_description": {
+        "message": "Download videos from 1000+ websites with fast and secure processing.",
+        "description": "About page description"
+    },
+    "popup_link_home": {
+        "message": "Visit Website",
+        "description": "About links"
+    },
+    "popup_link_privacy": {
+        "message": "Privacy Policy",
+        "description": "About links"
+    },
+    "popup_link_terms": {
+        "message": "Terms of Service",
+        "description": "About links"
+    },
+    "popup_link_support": {
+        "message": "Contact Support",
+        "description": "About links"
+    },
+    "popup_feature_download_video": {
+        "message": "Download videos in multiple formats",
+        "description": "About feature bullet"
+    },
+    "popup_feature_extract_audio": {
+        "message": "Extract audio from videos",
+        "description": "About feature bullet"
+    },
+    "popup_feature_convert": {
+        "message": "Trim and convert media files",
+        "description": "About feature bullet"
+    },
+    "popup_feature_thumbnails_subtitles": {
+        "message": "Download thumbnails and subtitles",
+        "description": "About feature bullet"
+    },
+    "popup_feature_1000_websites": {
+        "message": "Support for 1000+ websites",
+        "description": "About feature bullet"
+    },
+    "popup_rate_how_we_did": {
+        "message": "How did we do?",
+        "description": "Rate us page"
+    },
+    "popup_rate_let_us_know": {
+        "message": "Please let us know how we did with your support request. All feedback is appreciated to help us improve our offering!",
+        "description": "Rate us page body"
+    },
+    "popup_rate_no_thanks": {
+        "message": "No, thanks",
+        "description": "Rate us dismiss"
+    },
+    "popup_rate_thankyou_title": {
+        "message": "Thank You!",
+        "description": "Rate us thank you"
+    },
+    "popup_rate_thankyou_message": {
+        "message": "We appreciate your feedback. It helps us improve Royal Video Downloader for everyone!",
+        "description": "Rate us thank you body"
+    },
+    "popup_rate_thankyou_close": {
+        "message": "Close",
+        "description": "Rate us thank you button"
+    },
+    "filters_sort_by": {
+        "message": "Sort by size",
+        "description": "Filters tooltip"
+    },
+    "filters_list_view": {
+        "message": "List view",
+        "description": "Filters tooltip"
+    },
+    "filters_grid_view": {
+        "message": "Grid view",
+        "description": "Filters tooltip"
+    },
+    "recommended_downloads": {
+        "message": "Recommended for Download",
+        "description": "Downloads section heading"
+    },
+    "other_available_videos": {
+        "message": "Other Available Videos",
+        "description": "Other downloads heading"
+    },
+    "options_available": {
+        "message": "options available",
+        "description": "Suffix for option count"
+    },
+    "popup_download_search_placeholder": {
+        "message": "Filter by video title or author…",
+        "description": "Download list search field placeholder"
+    },
+    "popup_download_search_no_matches": {
+        "message": "No matching downloads",
+        "description": "Shown when search filter yields no results"
+    }
+}

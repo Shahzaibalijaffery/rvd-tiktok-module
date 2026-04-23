@@ -1,0 +1,38 @@
+[
+    {
+        "id": 1,
+        "priority": 1,
+        "action": {
+            "type": "modifyHeaders",
+            "requestHeaders": [
+                {
+                    "header": "Referer",
+                    "operation": "set",
+                    "value": "https://www.tiktok.com/"
+                }
+            ]
+        },
+        "condition": {
+            "urlFilter": "*://*.tiktok.com/*",
+            "resourceTypes": ["xmlhttprequest", "media", "other", "object"]
+        }
+    },
+    {
+        "id": 2,
+        "priority": 1,
+        "action": {
+            "type": "modifyHeaders",
+            "requestHeaders": [
+                {
+                    "header": "Referer",
+                    "operation": "set",
+                    "value": "https://www.tiktok.com/"
+                }
+            ]
+        },
+        "condition": {
+            "urlFilter": "*://*.tiktokcdn.com/*",
+            "resourceTypes": ["xmlhttprequest", "media", "other", "object"]
+        }
+    }
+]

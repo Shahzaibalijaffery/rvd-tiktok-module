@@ -1,0 +1,141 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* @source "../popup"; */
+/* @source "../components"; */
+
+@custom-variant dark (&:is(.dark *));
+
+:root,
+:host {
+    --radius-base: 0.625rem;
+
+    --primary: #5568c8;
+    --secondary: #e5e7eb;
+
+    --background: #fff;
+    --card-bg: #fff;
+    --card-border: #d1d5dc;
+    --hover-color: #f9fafb;
+
+    --tab-bg: #f9fafb;
+    --tab-hover: #f6f3f4;
+    --tab-text: #364153;
+
+    --text-primary: #364153;
+    --text-secondary: #4a5565;
+
+    --success: #00c951;
+    --warning: #ffd230;
+    --error: #fb2c36;
+    --info: #1447e6;
+
+    --scroll-track: #f1f5f9;
+    --scroll-thumb: #cbd5e1;
+    --scroll-thumb-hover: #94a3b8;
+
+    --primary-50: #f2f4fb;
+    --primary-100: #e4e8f7;
+    --primary-200: #c9d1ef;
+    --primary-300: #a7b4e5;
+    --primary-400: #7f8fda;
+    --primary-500: #5568c8;
+    --primary-600: #4a5bb5;
+    --primary-700: #3f4ea3;
+    --primary-800: #343f88;
+    --primary-900: #2a326d;
+    --primary-950: #1c2147;
+}
+
+.dark {
+    --primary: #5568c8;
+    --secondary: #3f3f3f;
+
+    --background: #181818;
+    --card-bg: #212121;
+    --card-border: #3f3f3f;
+    --hover-color: #3f3f3f;
+
+    --tab-bg: #282828;
+    --tab-hover: #3f3f3f;
+    --tab-text: #d1d5dc;
+
+    --text-primary: #d1d5dc;
+    --text-secondary: #99a1af;
+
+    --success: #05df72;
+    --warning: #e17100;
+    --error: #fb2c36;
+    --info: #0c71dd;
+
+    --scroll-track: #1f1f1f;
+    --scroll-thumb: #3a3a3a;
+    --scroll-thumb-hover: #4a4a4a;
+}
+
+@theme inline {
+    /* ====== Radius ====== */
+    --radius-sm: calc(var(--radius-base) - 4px);
+    --radius-md: calc(var(--radius-base) - 2px);
+    --radius-lg: var(--radius-base);
+    --radius-xl: calc(var(--radius-base) + 4px);
+
+    --color-primary: var(--primary);
+    --color-secondary: var(--secondary);
+
+    --color-bg: var(--background);
+    --color-card-bg: var(--card-bg);
+    --color-card-border: var(--card-border);
+    --color-text-primary: var(--text-primary);
+    --color-text-secondary: var(--text-secondary);
+    --color-hover: var(--hover-color);
+
+    --color-tab-bg: var(--tab-bg);
+    --color-tab-hover: var(--tab-hover);
+    --color-tab-text: var(--tab-text);
+
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-error: var(--error);
+    --color-info: var(--info);
+
+    --color-scroll-track: var(--scroll-track);
+    --color-scroll-thumb: var(--scroll-thumb);
+    --color-scroll-thumb-hover: var(--scroll-thumb-hover);
+}
+
+@layer base {
+    * {
+        @apply border-card-border;
+    }
+
+    body {
+        @apply bg-bg text-text-primary;
+    }
+}
+
+.overflow-y-auto::-webkit-scrollbar {
+    width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+    background: var(--scroll-track);
+    border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb);
+    border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: var(--scroll-thumb-hover);
+}
+
+.toaster .group {
+    z-index: 10000 !important;
+}
+
+button {
+    cursor: pointer;
+}

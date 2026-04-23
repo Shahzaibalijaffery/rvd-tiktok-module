@@ -1,0 +1,7 @@
+node_modules/
+
+# Library build output (`pnpm run build:lib`)
+dist/
+
+*.log
+.DS_Store

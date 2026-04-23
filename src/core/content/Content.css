@@ -1,0 +1,11 @@
+@import '../global.css';
+
+:root,
+:host {
+    --font-sans: system-ui, sans-serif;
+}
+
+.rvd-tt-root {
+    color: var(--text-primary);
+    font-size: 16px;
+}

@@ -1,0 +1,5 @@
+@import 'tailwindcss';
+
+/* Tailwind v4: scan content overlay + shared components used inside the shadow root */
+@source "./**/*.{tsx,ts}";
+@source "../../app/components/**/*.{tsx,ts}";
