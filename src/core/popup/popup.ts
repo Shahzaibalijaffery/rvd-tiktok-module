@@ -19,9 +19,6 @@ async function mediaInfoFromTab(tabId: number, url: string): Promise<MediaInfo> 
         tabId,
     );
 
-  
-
-
     if (response.error) {
         throw new Error(response.message);
     }

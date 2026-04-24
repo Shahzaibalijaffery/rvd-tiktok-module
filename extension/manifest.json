@@ -48,17 +48,7 @@
         "https://*.tiktokcdn.com/*"
     ],
 
-    "permissions": ["activeTab", "storage", "downloads", "declarativeNetRequest"],
-
-    "declarative_net_request": {
-        "rule_resources": [
-            {
-                "id": "tiktok_cdn_referer",
-                "enabled": true,
-                "path": "rules/tiktok-cdn-referer.json"
-            }
-        ]
-    },
+    "permissions": ["activeTab", "storage", "downloads"],
 
     "web_accessible_resources": [
         {

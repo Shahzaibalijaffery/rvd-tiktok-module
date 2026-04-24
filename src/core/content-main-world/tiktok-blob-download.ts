@@ -1,18 +1,17 @@
+// src/core/content-main-world/tiktok-blob-download.ts
 import {
-    RVD_TIKTOK_BLOB_MSG_SOURCE_ISO,
-    RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-    RVD_TIKTOK_BLOB_MSG_TYPE_REQUEST,
-    RVD_TIKTOK_BLOB_MSG_TYPE_RESULT,
-    RVD_TIKTOK_FETCH_BUF_MSG_TYPE_REQUEST,
-    RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT,
+    RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD,
+    RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER,
+    RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML,
+    RVD_TIKTOK_BRIDGE_SOURCE_ISO,
+    RVD_TIKTOK_BRIDGE_SOURCE_MAIN,
+    type TikTokBridgeOp,
 } from './protocol';
 
 export type TikTokBlobDownloadPayload = {
     mediaUrl: string;
     baseName: string;
 };
-
-export const RVD_TIKTOK_MAIN_WORLD_GLOBAL = '__rvdTikTokBlobDownload' as const;
 
 async function runTikTokBlobDownload(payload: TikTokBlobDownloadPayload): Promise<void> {
     const { mediaUrl, baseName } = payload;
@@ -23,55 +22,78 @@ async function runTikTokBlobDownload(payload: TikTokBlobDownloadPayload): Promis
         cache: 'no-store',
     });
 
-    if (!res.ok)
+    if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
+    }
 
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
+
     const a = document.createElement('a');
     a.href = blobUrl;
     a.download = baseName;
     a.style.display = 'none';
+
     const root = document.body ?? document.documentElement;
     root.appendChild(a);
     a.click();
     a.remove();
+
     window.setTimeout(() => URL.revokeObjectURL(blobUrl), 180_000);
 }
 
+/** Kept for compatibility with existing init call site. */
 export function installTikTokBlobDownloadMainWorld(): void {
-    const g = globalThis as unknown as Record<string, unknown>;
-    const key = RVD_TIKTOK_MAIN_WORLD_GLOBAL;
-
-    if (typeof g[key] === 'function')
-        return;
-
-    g[key] = runTikTokBlobDownload;
+    // no-op
 }
 
-/** Isolated content forwards `postMessage` here; we reply when `fetch` + save finishes. */
+function postOk<T>(token: string, op: TikTokBridgeOp, data: T, transfer?: Transferable[]): void {
+    window.postMessage(
+        {
+            source: RVD_TIKTOK_BRIDGE_SOURCE_MAIN,
+            token,
+            op,
+            ok: true as const,
+            data,
+        },
+        '*',
+        transfer,
+    );
+}
+
+function postFail(token: string, op: TikTokBridgeOp, error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    window.postMessage(
+        {
+            source: RVD_TIKTOK_BRIDGE_SOURCE_MAIN,
+            token,
+            op,
+            ok: false as const,
+            errorMessage,
+        },
+        '*',
+    );
+}
+
+/** Isolated content forwards postMessage here; this dispatches bridge operations. */
 export function wirePostMessageBridge(): void {
     window.addEventListener('message', (ev: MessageEvent) => {
-        if (ev.source !== window)
-            return;
+        if (ev.source !== window) return;
 
         const d = ev.data;
+        if (d?.source !== RVD_TIKTOK_BRIDGE_SOURCE_ISO) return;
 
-        if (d?.source !== RVD_TIKTOK_BLOB_MSG_SOURCE_ISO)
-            return;
+        const token = String(d?.token ?? '');
+        const op = d?.op as TikTokBridgeOp | undefined;
+        const payload = d?.payload;
 
-        if (d?.type === RVD_TIKTOK_FETCH_BUF_MSG_TYPE_REQUEST) {
-            const token = String(d.token ?? '');
-            const mediaUrl = String(d.mediaUrl ?? '');
+        if (!token || !op) return;
+
+        if (op === RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER) {
+            const mediaUrl = String(payload?.mediaUrl ?? '');
 
             if (!mediaUrl) {
-                window.postMessage({
-                    source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-                    type: RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT,
-                    token,
-                    ok: false,
-                    errorMessage: 'Missing mediaUrl.',
-                }, '*');
+                postFail(token, op, 'Missing mediaUrl.');
                 return;
             }
 
@@ -81,67 +103,49 @@ export function wirePostMessageBridge(): void {
                 cache: 'no-store',
             })
                 .then(async (res) => {
-                    if (!res.ok)
-                        throw new Error(`HTTP ${res.status}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const buffer = await res.arrayBuffer();
-                    window.postMessage({
-                        source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-                        type: RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT,
-                        token,
-                        ok: true,
-                        buffer,
-                    }, '*', [buffer]);
+                    postOk(token, op, buffer, [buffer]);
                 })
-                .catch((err: unknown) => {
-                    const errorMessage = err instanceof Error ? err.message : String(err);
-                    window.postMessage({
-                        source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-                        type: RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT,
-                        token,
-                        ok: false,
-                        errorMessage,
-                    }, '*');
-                });
+                .catch(err => postFail(token, op, err));
+
             return;
         }
 
-        if (d?.type !== RVD_TIKTOK_BLOB_MSG_TYPE_REQUEST)
-            return;
+        if (op === RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML) {
+            const pageUrl = String(payload?.pageUrl ?? '');
 
-        const token = String(d.token ?? '');
-        const payload = d.payload as TikTokBlobDownloadPayload;
-        const g = globalThis as unknown as Record<string, unknown>;
-        const fn = g[RVD_TIKTOK_MAIN_WORLD_GLOBAL] as ((p: TikTokBlobDownloadPayload) => Promise<void>) | undefined;
+            if (!pageUrl) {
+                postFail(token, op, 'Missing pageUrl.');
+                return;
+            }
 
-        if (typeof fn !== 'function') {
-            window.postMessage({
-                source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-                type: RVD_TIKTOK_BLOB_MSG_TYPE_RESULT,
-                token,
-                ok: false,
-                errorMessage: 'RVD TikTok main-world handler missing.',
-            }, '*');
-            return;
-        }
-
-        void fn(payload)
-            .then(() => {
-                window.postMessage({
-                    source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-                    type: RVD_TIKTOK_BLOB_MSG_TYPE_RESULT,
-                    token,
-                    ok: true,
-                }, '*');
+            void fetch(pageUrl, {
+                credentials: 'include',
+                mode: 'cors',
+                cache: 'no-store',
             })
-            .catch((err: unknown) => {
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                window.postMessage({
-                    source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-                    type: RVD_TIKTOK_BLOB_MSG_TYPE_RESULT,
-                    token,
-                    ok: false,
-                    errorMessage,
-                }, '*');
-            });
+                .then(async (res) => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const html = await res.text();
+                    postOk(token, op, { html });
+                })
+                .catch(err => postFail(token, op, err));
+
+            return;
+        }
+
+        if (op === RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD) {
+            const req = payload as TikTokBlobDownloadPayload;
+
+            if (!req?.mediaUrl || !req?.baseName) {
+                postFail(token, op, 'Missing mediaUrl or baseName.');
+                return;
+            }
+
+            void runTikTokBlobDownload(req)
+                .then(() => postOk(token, op, { ok: true }))
+                .catch(err => postFail(token, op, err));
+        }
     });
 }

@@ -1,10 +1,12 @@
-/** Isolated world → main world `postMessage` bridge for TikTok blob downloads. */
+// src/core/content-main-world/protocol.ts
+export const RVD_TIKTOK_BRIDGE_SOURCE_ISO = '__rvd_tiktok_iso__' as const;
+export const RVD_TIKTOK_BRIDGE_SOURCE_MAIN = '__rvd_tiktok_main__' as const;
 
-export const RVD_TIKTOK_BLOB_MSG_SOURCE_ISO = '__rvd_tiktok_iso__' as const;
-export const RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN = '__rvd_tiktok_main__' as const;
-export const RVD_TIKTOK_BLOB_MSG_TYPE_REQUEST = 'rvd-tiktok-blob-request' as const;
-export const RVD_TIKTOK_BLOB_MSG_TYPE_RESULT = 'rvd-tiktok-blob-result' as const;
+export const RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER = 'fetch-buffer' as const;
+export const RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD = 'blob-download' as const;
+export const RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML = 'fetch-page-html' as const;
 
-/** Isolated → main world: fetch bytes (same credentials as page) for FFmpeg / buffers. */
-export const RVD_TIKTOK_FETCH_BUF_MSG_TYPE_REQUEST = 'rvd-tiktok-fetch-buffer-request' as const;
-export const RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT = 'rvd-tiktok-fetch-buffer-result' as const;
+export type TikTokBridgeOp =
+    | typeof RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER
+    | typeof RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD
+    | typeof RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML;

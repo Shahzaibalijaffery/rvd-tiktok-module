@@ -1,10 +1,7 @@
 (function() {
-	var RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN = "__rvd_tiktok_main__";
-	var RVD_TIKTOK_BLOB_MSG_TYPE_RESULT = "rvd-tiktok-blob-result";
-	var RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT = "rvd-tiktok-fetch-buffer-result";
+	var RVD_TIKTOK_BRIDGE_SOURCE_MAIN = "__rvd_tiktok_main__";
 	//#endregion
 	//#region src/core/content-main-world/tiktok-blob-download.ts
-	var RVD_TIKTOK_MAIN_WORLD_GLOBAL = "__rvdTikTokBlobDownload";
 	async function runTikTokBlobDownload(payload) {
 		const { mediaUrl, baseName } = payload;
 		const res = await fetch(mediaUrl, {
@@ -24,29 +21,39 @@
 		a.remove();
 		window.setTimeout(() => URL.revokeObjectURL(blobUrl), 18e4);
 	}
-	function installTikTokBlobDownloadMainWorld() {
-		const g = globalThis;
-		const key = RVD_TIKTOK_MAIN_WORLD_GLOBAL;
-		if (typeof g[key] === "function") return;
-		g[key] = runTikTokBlobDownload;
+	function postOk(token, op, data, transfer) {
+		window.postMessage({
+			source: RVD_TIKTOK_BRIDGE_SOURCE_MAIN,
+			token,
+			op,
+			ok: true,
+			data
+		}, "*", transfer);
 	}
-	/** Isolated content forwards `postMessage` here; we reply when `fetch` + save finishes. */
+	function postFail(token, op, error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		window.postMessage({
+			source: RVD_TIKTOK_BRIDGE_SOURCE_MAIN,
+			token,
+			op,
+			ok: false,
+			errorMessage
+		}, "*");
+	}
+	/** Isolated content forwards postMessage here; this dispatches bridge operations. */
 	function wirePostMessageBridge() {
 		window.addEventListener("message", (ev) => {
 			if (ev.source !== window) return;
 			const d = ev.data;
 			if (d?.source !== "__rvd_tiktok_iso__") return;
-			if (d?.type === "rvd-tiktok-fetch-buffer-request") {
-				const token = String(d.token ?? "");
-				const mediaUrl = String(d.mediaUrl ?? "");
+			const token = String(d?.token ?? "");
+			const op = d?.op;
+			const payload = d?.payload;
+			if (!token || !op) return;
+			if (op === "fetch-buffer") {
+				const mediaUrl = String(payload?.mediaUrl ?? "");
 				if (!mediaUrl) {
-					window.postMessage({
-						source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-						type: RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT,
-						token,
-						ok: false,
-						errorMessage: "Missing mediaUrl."
-					}, "*");
+					postFail(token, op, "Missing mediaUrl.");
 					return;
 				}
 				fetch(mediaUrl, {
@@ -56,62 +63,39 @@
 				}).then(async (res) => {
 					if (!res.ok) throw new Error(`HTTP ${res.status}`);
 					const buffer = await res.arrayBuffer();
-					window.postMessage({
-						source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-						type: RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT,
-						token,
-						ok: true,
-						buffer
-					}, "*", [buffer]);
-				}).catch((err) => {
-					const errorMessage = err instanceof Error ? err.message : String(err);
-					window.postMessage({
-						source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-						type: RVD_TIKTOK_FETCH_BUF_MSG_TYPE_RESULT,
-						token,
-						ok: false,
-						errorMessage
-					}, "*");
-				});
+					postOk(token, op, buffer, [buffer]);
+				}).catch((err) => postFail(token, op, err));
 				return;
 			}
-			if (d?.type !== "rvd-tiktok-blob-request") return;
-			const token = String(d.token ?? "");
-			const payload = d.payload;
-			const fn = globalThis[RVD_TIKTOK_MAIN_WORLD_GLOBAL];
-			if (typeof fn !== "function") {
-				window.postMessage({
-					source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-					type: RVD_TIKTOK_BLOB_MSG_TYPE_RESULT,
-					token,
-					ok: false,
-					errorMessage: "RVD TikTok main-world handler missing."
-				}, "*");
+			if (op === "fetch-page-html") {
+				const pageUrl = String(payload?.pageUrl ?? "");
+				if (!pageUrl) {
+					postFail(token, op, "Missing pageUrl.");
+					return;
+				}
+				fetch(pageUrl, {
+					credentials: "include",
+					mode: "cors",
+					cache: "no-store"
+				}).then(async (res) => {
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					postOk(token, op, { html: await res.text() });
+				}).catch((err) => postFail(token, op, err));
 				return;
 			}
-			fn(payload).then(() => {
-				window.postMessage({
-					source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-					type: RVD_TIKTOK_BLOB_MSG_TYPE_RESULT,
-					token,
-					ok: true
-				}, "*");
-			}).catch((err) => {
-				const errorMessage = err instanceof Error ? err.message : String(err);
-				window.postMessage({
-					source: RVD_TIKTOK_BLOB_MSG_SOURCE_MAIN,
-					type: RVD_TIKTOK_BLOB_MSG_TYPE_RESULT,
-					token,
-					ok: false,
-					errorMessage
-				}, "*");
-			});
+			if (op === "blob-download") {
+				const req = payload;
+				if (!req?.mediaUrl || !req?.baseName) {
+					postFail(token, op, "Missing mediaUrl or baseName.");
+					return;
+				}
+				runTikTokBlobDownload(req).then(() => postOk(token, op, { ok: true })).catch((err) => postFail(token, op, err));
+			}
 		});
 	}
 	//#endregion
 	//#region src/core/content-main-world/content-main-world.ts
 	function initContentMainWorld() {
-		installTikTokBlobDownloadMainWorld();
 		wirePostMessageBridge();
 	}
 	//#endregion

@@ -20219,23 +20219,17 @@
 	var CONTENT_MESSAGE_PAGE = `content/${MODULE_NAME}`;
 	//#endregion
 	//#region src/core/content-main-world/protocol.ts
-	/** Isolated world → main world `postMessage` bridge for TikTok blob downloads. */
-	var RVD_TIKTOK_BLOB_MSG_SOURCE_ISO = "__rvd_tiktok_iso__";
-	var RVD_TIKTOK_BLOB_MSG_TYPE_REQUEST = "rvd-tiktok-blob-request";
-	/** Isolated → main world: fetch bytes (same credentials as page) for FFmpeg / buffers. */
-	var RVD_TIKTOK_FETCH_BUF_MSG_TYPE_REQUEST = "rvd-tiktok-fetch-buffer-request";
+	var RVD_TIKTOK_BRIDGE_SOURCE_ISO = "__rvd_tiktok_iso__";
+	var RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER = "fetch-buffer";
+	var RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD = "blob-download";
+	var RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML = "fetch-page-html";
 	//#endregion
-	//#region src/core/content/tiktok-main-world-fetch.ts
-	var TIMEOUT_MS = 6e5;
-	/**
-	* Fetches TikTok CDN / media URLs in the page main world (cookies + referer),
-	* then returns the bytes to the isolated content script.
-	*/
-	async function fetchTikTokMediaArrayBufferInPage(mediaUrl, options) {
-		if (!/tiktok\.com/i.test(location.hostname)) throw new Error("Keep this tab on TikTok.");
+	//#region src/core/content/tiktok-main-world-bridge-client.ts
+	async function callTikTokMainWorld(op, payload, options) {
+		const timeoutMs = options?.timeoutMs ?? 6e5;
+		const token = `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 		if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 		return new Promise((resolve, reject) => {
-			const token = `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 			let t;
 			const cleanup = () => {
 				window.removeEventListener("message", onReply);
@@ -20249,29 +20243,40 @@
 			const onReply = (ev) => {
 				if (ev.source !== window) return;
 				const d = ev.data;
-				if (d?.source !== "__rvd_tiktok_main__" || d?.type !== "rvd-tiktok-fetch-buffer-result" || d.token !== token) return;
+				if (d?.source !== "__rvd_tiktok_main__" || d?.token !== token || d?.op !== op) return;
 				cleanup();
 				if (d.ok === true) {
-					const buf = d.buffer;
-					if (buf instanceof ArrayBuffer) {
-						resolve(buf);
-						return;
-					}
+					resolve(d.data);
+					return;
 				}
-				reject(new Error(typeof d.errorMessage === "string" ? d.errorMessage : "TikTok media fetch failed"));
+				reject(new Error(d.errorMessage || "Main-world bridge failed"));
 			};
 			window.addEventListener("message", onReply);
 			options?.signal?.addEventListener("abort", onAbort, { once: true });
 			t = setTimeout(() => {
 				cleanup();
-				reject(/* @__PURE__ */ new Error("TikTok media fetch timed out."));
-			}, TIMEOUT_MS);
+				reject(/* @__PURE__ */ new Error(`TikTok bridge timed out (${op}).`));
+			}, timeoutMs);
 			window.postMessage({
-				source: RVD_TIKTOK_BLOB_MSG_SOURCE_ISO,
-				type: RVD_TIKTOK_FETCH_BUF_MSG_TYPE_REQUEST,
+				source: RVD_TIKTOK_BRIDGE_SOURCE_ISO,
 				token,
-				mediaUrl
+				op,
+				payload
 			}, "*");
+		});
+	}
+	//#endregion
+	//#region src/core/content/tiktok-main-world-fetch.ts
+	var TIMEOUT_MS = 6e5;
+	/**
+	* Fetches TikTok CDN / media URLs in the page main world (cookies + referer),
+	* then returns bytes to isolated content script.
+	*/
+	async function fetchTikTokMediaArrayBufferInPage(mediaUrl, options) {
+		if (!/tiktok\.com/i.test(location.hostname)) throw new Error("Keep this tab on TikTok.");
+		return callTikTokMainWorld(RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER, { mediaUrl }, {
+			timeoutMs: TIMEOUT_MS,
+			signal: options?.signal
 		});
 	}
 	//#endregion
@@ -20653,52 +20658,24 @@
 	//#endregion
 	//#region src/core/content/tiktok-blob-download-bridge.ts
 	var BLOB_DOWNLOAD_TIMEOUT_MS = 61e4;
-	/** Bridges background → isolated content → main world (`content-main-world.js`) via `postMessage`. */
+	/** Bridges background -> isolated content -> main world via shared bridge client. */
 	function registerTikTokBlobDownloadBridge() {
-		runtimeMessageInstance(CONTENT_MESSAGE_PAGE).on("tikTok blob download", (data, { ok, fail }) => {
-			if (!/tiktok\.com/i.test(location.hostname)) return Promise.resolve(fail("Keep this tab on TikTok to download."));
-			const token = `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
-			return new Promise((resolve) => {
-				let settled = false;
-				const rowUuid = useDownloadsStore.getState().beginTikTokBlobDownload(data.baseName);
-				const { updateStatus } = useDownloadsStore.getState();
-				const finish = (out) => {
-					if (settled) return;
-					settled = true;
-					window.removeEventListener("message", onReply);
-					window.clearTimeout(timer);
-					resolve(out);
-				};
-				const onReply = (ev) => {
-					if (ev.source !== window) return;
-					const d = ev.data;
-					if (d?.source !== "__rvd_tiktok_main__" || d?.type !== "rvd-tiktok-blob-result" || d.token !== token) return;
-					if (d.ok === true) {
-						updateStatus(rowUuid, { state: "complete" });
-						finish(ok({ ok: true }));
-					} else {
-						updateStatus(rowUuid, {
-							state: "failed",
-							message: typeof d.errorMessage === "string" ? d.errorMessage : "TikTok download failed."
-						});
-						finish(fail(typeof d.errorMessage === "string" ? d.errorMessage : "TikTok download failed."));
-					}
-				};
-				window.addEventListener("message", onReply);
-				const timer = window.setTimeout(() => {
-					updateStatus(rowUuid, {
-						state: "failed",
-						message: "TikTok download timed out."
-					});
-					finish(fail("TikTok download timed out."));
-				}, BLOB_DOWNLOAD_TIMEOUT_MS);
-				window.postMessage({
-					source: RVD_TIKTOK_BLOB_MSG_SOURCE_ISO,
-					type: RVD_TIKTOK_BLOB_MSG_TYPE_REQUEST,
-					token,
-					payload: data
-				}, "*");
-			});
+		runtimeMessageInstance(CONTENT_MESSAGE_PAGE).on("tikTok blob download", async (data, { ok, fail }) => {
+			if (!/tiktok\.com/i.test(location.hostname)) return fail("Keep this tab on TikTok to download.");
+			const rowUuid = useDownloadsStore.getState().beginTikTokBlobDownload(data.baseName);
+			const { updateStatus } = useDownloadsStore.getState();
+			try {
+				await callTikTokMainWorld(RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD, data, { timeoutMs: BLOB_DOWNLOAD_TIMEOUT_MS });
+				updateStatus(rowUuid, { state: "complete" });
+				return ok({ ok: true });
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				updateStatus(rowUuid, {
+					state: "failed",
+					message
+				});
+				return fail(message);
+			}
 		});
 	}
 	//#endregion
@@ -20944,10 +20921,11 @@
 		const handle = uniqueId.replace(/^@/, "");
 		return `https://www.tiktok.com/@${encodeURIComponent(handle)}/video/${videoId}`;
 	}
-	async function requestPageHtmlFromBackground(pageUrl) {
-		const response = await runtimeMessageInstance(CONTENT_MESSAGE_PAGE).send("background", "fetch tiktok page html", { url: pageUrl });
-		if (response.error) throw new Error(response.message);
-		return response.data.html;
+	async function requestPageHtmlFromMainWorld(pageUrl) {
+		return (await callTikTokMainWorld(RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML, { pageUrl }, { timeoutMs: 2e4 })).html;
+	}
+	function hasHydrationPayload(html) {
+		return html.includes("__UNIVERSAL_DATA_FOR_REHYDRATION__");
 	}
 	async function mediaInfoFromPageWithRetry(maxWaitMs = DEFAULT_MAX_WAIT_MS) {
 		if (!isTikTokWebDocument()) throw new Error("This does not look like a TikTok web page.");
@@ -21004,12 +20982,15 @@
 			handle = handle ?? domData.handle;
 		}
 		if (!videoId || !handle) throw new Error("Could not reliably detect TikTok video info from DOM.");
-		const info = buildTikTokFeedMediaInfoFromHtml(await requestPageHtmlFromBackground(buildTikTokDetailPageUrl(handle, videoId)), videoId);
-		console.log(handle, videoId, "info");
-		if (!info) throw new Error("Could not parse TikTok video from the fetched page.");
+		const pageUrl = buildTikTokDetailPageUrl(handle, videoId);
+		let html = await requestPageHtmlFromMainWorld(pageUrl);
+		if (!hasHydrationPayload(html)) html = await requestPageHtmlFromMainWorld(pageUrl);
+		let info = buildTikTokFeedMediaInfoFromHtml(html, videoId);
+		if (!info) info = buildTikTokFeedMediaInfoFromHtml(await requestPageHtmlFromMainWorld(pageUrl), videoId);
+		if (!info) throw new Error("Could not parse TikTok video from fetched page HTML.");
 		return info;
 	}
-	/** Content: `get video info` → visible DOM identity → background HTML → parse → {@link MediaInfo}. */
+	/** Content: `get video info` -> visible DOM identity -> fetch HTML -> parse -> MediaInfo. */
 	function registerPageVideoInfo() {
 		runtimeMessageInstance(CONTENT_MESSAGE_PAGE).on("get video info", async (_data, { ok, fail }) => {
 			try {

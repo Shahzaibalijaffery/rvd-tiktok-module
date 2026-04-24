@@ -1,3 +1,4 @@
+// src/core/background/background.ts
 import type { Message, MessageListener, MessageResponse } from '@/system/types';
 import type { TikTokBlobDownloadPayload } from '@/core/content-main-world/tiktok-blob-download';
 import { CONTENT_MESSAGE_PAGE } from '@/core/constants';
@@ -5,8 +6,6 @@ import { RUNTIME_MESSAGE_NAMESPACE } from '@/module-config';
 import { onRuntimeMessage } from '@/system/background';
 
 import { isTikTokMediaDownloadSourceUrl } from '@/core/common/tiktok-cdn-url';
-
-import { fetchTiktokVideoDetailPageHtml } from './tiktok-fetch-page-html';
 
 const RE_INVALID_FILENAME = /invalid filename/i;
 const TAB_SEND_RETRIES = 5;
@@ -96,7 +95,7 @@ async function sendTikTokBlobDownloadToTab(tabId: number, payload: TikTokBlobDow
     throw lastError;
 }
 
-/** Asks the tab’s isolated content → `postMessage` → manifest MAIN-world script to fetch + blob-save. */
+/** Asks the tab’s isolated content -> postMessage -> manifest MAIN-world script to fetch + blob-save. */
 async function downloadTikTokMediaViaMainWorld(tabId: number, mediaUrl: string, filenameHint: string | undefined): Promise<void> {
     const tab = await chrome.tabs.get(tabId);
     const pageUrl = tab.url ?? '';
@@ -118,7 +117,6 @@ export async function initBackground() {
     const messageListeners: {
         'download': MessageListener<DownloadPayload, { id: number }>;
         'open downloads folder': MessageListener;
-        'fetch tiktok page html': MessageListener<{ url: string }, { html: string }>;
     } = {
         'download': async ({ url, filename, saveAs, conflictAction, tabId: dataTabId }, { ok, fail, sender }) => {
             const saveAsResolved = typeof saveAs !== 'undefined' ? saveAs : false;
@@ -136,17 +134,20 @@ export async function initBackground() {
             };
 
             try {
+                // TikTok media URLs must go through main-world flow only.
                 if (isTikTokMediaDownloadSourceUrl(url)) {
                     const tabId = await resolveDownloadTargetTabId(dataTabId, sender);
 
-                    if (typeof tabId === 'number') {
-                        try {
-                            await downloadTikTokMediaViaMainWorld(tabId, url, filename);
-                            return ok({ id: -1 });
-                        }
-                        catch {
-                            /* fall through to chrome.downloads */
-                        }
+                    if (typeof tabId !== 'number') {
+                        return fail('No TikTok tab id available for main-world download.');
+                    }
+
+                    try {
+                        await downloadTikTokMediaViaMainWorld(tabId, url, filename);
+                        return ok({ id: -1 });
+                    }
+                    catch (e) {
+                        return fail(formatCaughtError(e));
                     }
                 }
 
@@ -157,7 +158,7 @@ export async function initBackground() {
                 const message = formatCaughtError(e);
                 const isInvalidName = RE_INVALID_FILENAME.test(message);
 
-                if (!isTikTokMediaDownloadSourceUrl(url) && isInvalidName && filename) {
+                if (isInvalidName && filename) {
                     console.warn('[RVD] Invalid filename, retrying without suggested name', { filename, url: url.slice(0, 120) });
                     try {
                         const id = await chrome.downloads.download(buildDirectOptions(false));
@@ -176,16 +177,6 @@ export async function initBackground() {
 
         'open downloads folder': () => {
             chrome.downloads.showDefaultFolder();
-        },
-
-        'fetch tiktok page html': async ({ url }, { ok, fail }) => {
-            try {
-                const html = await fetchTiktokVideoDetailPageHtml(url);
-                return ok({ html });
-            }
-            catch (e) {
-                return fail(formatCaughtError(e));
-            }
         },
     };
 
