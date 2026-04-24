@@ -20935,130 +20935,11 @@
 		};
 	}
 	//#endregion
-	//#region src/core/content/tiktok-video-identity.ts
-	var RE_VIDEO_PATH = /@([^/]+)\/video\/(\d+)/i;
-	var RE_VIDEO_ID = /\/video\/(\d+)/;
-	var FEED_ITEM_SELECTORS = ["[id^=\"one-column-item-\"]", "[data-e2e=\"recommend-list-item-container\"]"];
-	var XG_PREFIX = "xgwrapper-0-";
-	function normalizeHandle(raw) {
-		return raw.replace(/^@/, "").trim();
-	}
-	function parseIdentityFromHrefString(href) {
-		const s = href.trim();
-		if (!s) return null;
-		try {
-			const abs = s.startsWith("http") ? s : `https://www.tiktok.com${s.startsWith("/") ? "" : "/"}${s}`;
-			const m = new URL(abs).pathname.match(RE_VIDEO_PATH);
-			const g1 = m?.[1];
-			const g2 = m?.[2];
-			if (g1 && g2) return {
-				uniqueId: normalizeHandle(g1),
-				videoId: g2.trim()
-			};
-		} catch {
-			const m = s.match(RE_VIDEO_PATH);
-			const g1 = m?.[1];
-			const g2 = m?.[2];
-			if (g1 && g2) return {
-				uniqueId: normalizeHandle(g1),
-				videoId: g2.trim()
-			};
-		}
-		return null;
-	}
-	/** Fraction of `el`'s box that lies inside the viewport (0 = off-screen). */
-	function viewportVisibleRatio(el) {
-		const r = el.getBoundingClientRect();
-		if (r.width <= 0 || r.height <= 0) return 0;
-		return Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) / (r.width * r.height);
-	}
-	/** Pixel area of the intersection of `el` with the viewport. */
-	function visibleIntersectionArea(el) {
-		const r = el.getBoundingClientRect();
-		if (r.width <= 0 || r.height <= 0) return 0;
-		return Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
-	}
-	function feedArticles() {
-		const seen = /* @__PURE__ */ new Set();
-		const list = [];
-		for (const sel of FEED_ITEM_SELECTORS) document.querySelectorAll(sel).forEach((el) => {
-			if (!seen.has(el)) {
-				seen.add(el);
-				list.push(el);
-			}
-		});
-		return list;
-	}
-	function videoIdFromArticle(article) {
-		const w = article.querySelector(`[id^="${XG_PREFIX}"]`);
-		if (w?.id?.startsWith(XG_PREFIX)) {
-			const id = w.id.slice(12);
-			if (/^\d+$/.test(id)) return id;
-		}
-		for (const a of article.querySelectorAll("a[href*=\"/video/\"]")) {
-			const m = (a.getAttribute("href") || "").match(RE_VIDEO_ID);
-			if (m?.[1]) return m[1];
-		}
-		return null;
-	}
-	/** Author + id from links inside one feed / list item. */
-	function identityFromFeedArticle(article) {
-		const vid = videoIdFromArticle(article);
-		if (!vid) return null;
-		for (const a of article.querySelectorAll("a[href*=\"/video/\"]")) {
-			const p = parseIdentityFromHrefString(a.getAttribute("href") || "");
-			if (p?.videoId === vid) return p;
-		}
-		const handleRe = /^\/@([^/]+)/i;
-		for (const a of article.querySelectorAll("a[href^=\"/@\"]")) {
-			const href = a.getAttribute("href") || "";
-			const mh = href.match(handleRe);
-			if (mh?.[1] && !href.includes("/video/")) return {
-				uniqueId: normalizeHandle(mh[1]),
-				videoId: vid
-			};
-		}
-		return null;
-	}
-	/** Visible `a[href*="/video/"]` with largest on-screen area (e.g. detail page caption link). */
-	function identityFromVisibleVideoAnchors() {
-		let best = null;
-		for (const a of document.querySelectorAll("a[href*=\"/video/\"]")) {
-			const area = visibleIntersectionArea(a);
-			if (area <= 0) continue;
-			const p = parseIdentityFromHrefString(a.getAttribute("href") || "");
-			if (!p) continue;
-			if (!best || area > best.area) best = {
-				...p,
-				area
-			};
-		}
-		return best ? {
-			uniqueId: best.uniqueId,
-			videoId: best.videoId
-		} : null;
-	}
-	/**
-	* Feed rows that intersect the viewport, most visible first; then any on-screen `/video/` link.
-	*/
-	function resolveTikTokPageVideoIdentity() {
-		const ranked = feedArticles().map((el) => ({
-			el,
-			r: viewportVisibleRatio(el)
-		})).filter((x) => x.r > 0).sort((a, b) => b.r - a.r);
-		for (const { el } of ranked) {
-			const id = identityFromFeedArticle(el);
-			if (id) return id;
-		}
-		return identityFromVisibleVideoAnchors();
-	}
+	//#region src/core/content/tiktok-page-info.ts
+	var DEFAULT_MAX_WAIT_MS = 8e3;
 	function isTikTokWebDocument() {
 		return /tiktok\.com$/i.test(location.hostname);
 	}
-	//#endregion
-	//#region src/core/content/tiktok-page-info.ts
-	var RETRY_INTERVAL_MS = 400;
-	var DEFAULT_MAX_WAIT_MS = 8e3;
 	function buildTikTokDetailPageUrl(uniqueId, videoId) {
 		const handle = uniqueId.replace(/^@/, "");
 		return `https://www.tiktok.com/@${encodeURIComponent(handle)}/video/${videoId}`;
@@ -21070,37 +20951,63 @@
 	}
 	async function mediaInfoFromPageWithRetry(maxWaitMs = DEFAULT_MAX_WAIT_MS) {
 		if (!isTikTokWebDocument()) throw new Error("This does not look like a TikTok web page.");
-		let url = window.location.href;
-		if (url.match(/@([^/]+)\/video\/(\d+)/)) {
-			const match = url.match(/@([^/]+)\/video\/(\d+)/);
-			if (match) {
-				const handle = `@${match[1]}`;
-				const videoId = match[2] ?? "";
-				const info = buildTikTokFeedMediaInfoFromHtml(await requestPageHtmlFromBackground(buildTikTokDetailPageUrl(handle, videoId)), videoId);
-				if (!info) throw new Error("Could not parse TikTok video from the fetched page.");
-				return info;
-			}
+		const startTime = Date.now();
+		let handle = null;
+		let videoId = null;
+		const urlMatch = window.location.href.match(/@([^/]+)\/video\/(\d+)/);
+		if (urlMatch) {
+			handle = urlMatch[1] ?? null;
+			videoId = urlMatch[2] ?? "";
 		}
-		const deadline = Date.now() + maxWaitMs;
-		let lastError = /* @__PURE__ */ new Error("Could not read a visible TikTok video on this page yet. Scroll so a video is on screen, or open a video permalink.");
-		while (Date.now() < deadline) {
-			const dom = resolveTikTokPageVideoIdentity();
-			if (!dom) {
-				lastError = /* @__PURE__ */ new Error("Could not read video id and author from the page yet.");
-				await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS));
-				continue;
+		function extractFromDom() {
+			const videos = document.querySelectorAll("video");
+			if (!videos.length) return {
+				videoId: null,
+				handle: null
+			};
+			const viewportCenter = window.innerHeight / 2;
+			let closest = null;
+			let minDistance = Infinity;
+			for (const video of videos) {
+				const rect = video.getBoundingClientRect();
+				if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+				const center = rect.top + rect.height / 2;
+				const distance = Math.abs(viewportCenter - center);
+				if (distance < minDistance) {
+					minDistance = distance;
+					closest = video;
+				}
 			}
-			const pageUrl = buildTikTokDetailPageUrl(dom.uniqueId, dom.videoId);
-			try {
-				const info = buildTikTokFeedMediaInfoFromHtml(await requestPageHtmlFromBackground(pageUrl), dom.videoId);
-				if (!info) throw new Error("Could not parse TikTok video from the fetched page.");
-				return info;
-			} catch (error) {
-				lastError = error instanceof Error ? error : new Error(String(error));
-				await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS));
-			}
+			if (!closest) return {
+				videoId: null,
+				handle: null
+			};
+			const id = closest.closest("[id^=\"xgwrapper-\"]")?.id.match(/(\d+)$/)?.[1] ?? null;
+			const username = (closest.closest("article[data-e2e=\"recommend-list-item-container\"]")?.querySelector("[data-e2e=\"video-author-avatar\"] img"))?.alt?.trim() ?? null;
+			return {
+				videoId: id,
+				handle: username ? `@${username}` : null
+			};
 		}
-		throw lastError;
+		async function waitForVideoData() {
+			const retryDelay = 250;
+			while (Date.now() - startTime < maxWaitMs) {
+				const result = extractFromDom();
+				if (result.videoId && result.handle) return result;
+				await new Promise((res) => setTimeout(res, retryDelay));
+			}
+			return extractFromDom();
+		}
+		if (!urlMatch) {
+			const domData = await waitForVideoData();
+			videoId = videoId ?? domData.videoId;
+			handle = handle ?? domData.handle;
+		}
+		if (!videoId || !handle) throw new Error("Could not reliably detect TikTok video info from DOM.");
+		const info = buildTikTokFeedMediaInfoFromHtml(await requestPageHtmlFromBackground(buildTikTokDetailPageUrl(handle, videoId)), videoId);
+		console.log(handle, videoId, "info");
+		if (!info) throw new Error("Could not parse TikTok video from the fetched page.");
+		return info;
 	}
 	/** Content: `get video info` → visible DOM identity → background HTML → parse → {@link MediaInfo}. */
 	function registerPageVideoInfo() {

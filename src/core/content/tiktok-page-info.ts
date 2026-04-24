@@ -1,13 +1,15 @@
 import type { MediaInfo } from '@/system/types';
-
 import { buildTikTokFeedMediaInfoFromHtml } from '@/core/background/tiktok-html-parse';
 import { runtimeMessageInstance } from '@/core/common/globals';
 import { CONTENT_MESSAGE_PAGE } from '@/core/constants';
 
-import { isTikTokWebDocument, resolveTikTokPageVideoIdentity } from './tiktok-video-identity';
-
 const RETRY_INTERVAL_MS = 400;
 const DEFAULT_MAX_WAIT_MS = 8000;
+const MAX_RETRIES = 3;
+
+export function isTikTokWebDocument(): boolean {
+    return /tiktok\.com$/i.test(location.hostname);
+}
 
 function buildTikTokDetailPageUrl(uniqueId: string, videoId: string): string {
     const handle = uniqueId.replace(/^@/, '');
@@ -26,62 +28,107 @@ async function requestPageHtmlFromBackground(pageUrl: string): Promise<string> {
     return response.data.html;
 }
 
-async function mediaInfoFromPageWithRetry(maxWaitMs: number = DEFAULT_MAX_WAIT_MS): Promise<MediaInfo> {
+async function mediaInfoFromPageWithRetry(
+    maxWaitMs: number = DEFAULT_MAX_WAIT_MS
+  ): Promise<MediaInfo> {
     if (!isTikTokWebDocument()) {
-        throw new Error('This does not look like a TikTok web page.');
+      throw new Error('This does not look like a TikTok web page.');
     }
-
-    let url = window.location.href;
-    if(url.match(/@([^/]+)\/video\/(\d+)/)){
-        const match = url.match(/@([^/]+)\/video\/(\d+)/)
-        if(match) {
-            const handle = `@${match[1]}`;
-            const videoId = match[2] ?? '';
-            const pageUrl = buildTikTokDetailPageUrl(handle, videoId);
-            const html = await requestPageHtmlFromBackground(pageUrl);
-            const info =  buildTikTokFeedMediaInfoFromHtml(html, videoId);
-            if (!info) {
-                throw new Error('Could not parse TikTok video from the fetched page.');
-            }
-            return info as MediaInfo;
-        }
+  
+    const startTime = Date.now();
+    let handle: string | null = null;
+    let videoId: string | null = null;
+  
+    const urlMatch = window.location.href.match(/@([^/]+)\/video\/(\d+)/);
+    if (urlMatch) {
+      handle = urlMatch[1] ?? null;
+      videoId = urlMatch[2] ?? '';
     }
-
-
-    const deadline = Date.now() + maxWaitMs;
-    let lastError = new Error(
-        'Could not read a visible TikTok video on this page yet. Scroll so a video is on screen, or open a video permalink.',
-    );
-
-    while (Date.now() < deadline) {
-        const dom = resolveTikTokPageVideoIdentity();
-
-        if (!dom) {
-            lastError = new Error('Could not read video id and author from the page yet.');
-            await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_MS));
-            continue;
+  
+    function extractFromDom(): { videoId: string | null; handle: string | null } {
+      const videos = document.querySelectorAll<HTMLVideoElement>('video');
+      if (!videos.length) return { videoId: null, handle: null };
+  
+      const viewportCenter = window.innerHeight / 2;
+  
+      let closest: HTMLVideoElement | null = null;
+      let minDistance = Infinity;
+  
+      for (const video of videos) {
+        const rect = video.getBoundingClientRect();
+  
+        if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+  
+        const center = rect.top + rect.height / 2;
+        const distance = Math.abs(viewportCenter - center);
+  
+        if (distance < minDistance) {
+          minDistance = distance;
+          closest = video;
         }
-
-        const pageUrl = buildTikTokDetailPageUrl(dom.uniqueId, dom.videoId);
-
-        try {
-            const html = await requestPageHtmlFromBackground(pageUrl);
-            const info = buildTikTokFeedMediaInfoFromHtml(html, dom.videoId);
-
-            if (!info) {
-                throw new Error('Could not parse TikTok video from the fetched page.');
-            }
-
-            return info;
-        }
-        catch (error) {
-            lastError = error instanceof Error ? error : new Error(String(error));
-            await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_MS));
-        }
+      }
+  
+      if (!closest) return { videoId: null, handle: null };
+  
+      const wrapper = closest.closest<HTMLElement>('[id^="xgwrapper-"]');
+      const id = wrapper?.id.match(/(\d+)$/)?.[1] ?? null;
+  
+      const article = closest.closest<HTMLElement>(
+        'article[data-e2e="recommend-list-item-container"]'
+      );
+  
+      const avatarImg = article?.querySelector<HTMLImageElement>(
+        '[data-e2e="video-author-avatar"] img'
+      );
+  
+      const username = avatarImg?.alt?.trim() ?? null;
+  
+      return {
+        videoId: id,
+        handle: username ? `@${username}` : null,
+      };
     }
+  
+    async function waitForVideoData(): Promise<{ videoId: string | null; handle: string | null }> {
+      const retryDelay = 250;
+  
+      while (Date.now() - startTime < maxWaitMs) {
+        const result = extractFromDom();
+  
+        if (result.videoId && result.handle) {
+          return result;
+        }
+  
+        await new Promise(res => setTimeout(res, retryDelay));
+      }
+  
+      return extractFromDom();
+    }
+    
 
-    throw lastError;
-}
+    if(!urlMatch) {
+        const domData = await waitForVideoData();
+        videoId = videoId ?? domData.videoId;
+        handle = handle ?? domData.handle;
+    }
+  
+    if (!videoId || !handle) {
+      throw new Error('Could not reliably detect TikTok video info from DOM.');
+    }
+  
+    const pageUrl = buildTikTokDetailPageUrl(handle, videoId);
+    const html = await requestPageHtmlFromBackground(pageUrl);
+  
+    const info = buildTikTokFeedMediaInfoFromHtml(html, videoId);
+
+    console.log(handle,videoId,"info");
+  
+    if (!info) {
+      throw new Error('Could not parse TikTok video from the fetched page.');
+    }
+  
+    return info;
+  }
 
 /** Content: `get video info` → visible DOM identity → background HTML → parse → {@link MediaInfo}. */
 export function registerPageVideoInfo(): void {
