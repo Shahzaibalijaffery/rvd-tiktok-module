@@ -20171,6 +20171,9 @@
 		return filename.trim();
 	}
 	/**
+	* @param page Runtime sender page namespace.
+	* @param url Source media URL.
+	* @param filenameOptions Optional filename construction options.
 	* @param targetTabId Tab where TikTok runs — required for main-world blob downloads from the popup
 	*        (content-script sends can omit; background uses `sender.tab`).
 	*/
@@ -20222,25 +20225,71 @@
 	var RVD_TIKTOK_BRIDGE_SOURCE_ISO = "__rvd_tiktok_iso__";
 	var RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER = "fetch-buffer";
 	var RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD = "blob-download";
-	var RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML = "fetch-page-html";
 	//#endregion
-	//#region src/core/content/tiktok-main-world-bridge-client.ts
+	//#region src/core/content/tiktok-content-bridge.ts
+	var BLOB_DOWNLOAD_TIMEOUT_MS = 61e4;
+	var BUFFER_FETCH_TIMEOUT_MS = 6e5;
+	var MAX_API_SNAPSHOTS = 30;
+	var MAX_DOCUMENT_SNAPSHOTS = 15;
+	var apiSnapshots = [];
+	var documentSnapshots = [];
+	var apiInterceptionListenerRegistered = false;
+	function registerTikTokApiInterceptionListener() {
+		if (apiInterceptionListenerRegistered) return;
+		apiInterceptionListenerRegistered = true;
+		window.addEventListener("message", (ev) => {
+			if (ev.source !== window) return;
+			const d = ev.data;
+			if (d?.source !== "__rvd_tiktok_main__" || d?.type !== "item-list-response" || typeof d?.url !== "string") {
+				if (d?.source !== "__rvd_tiktok_main__" || d?.type !== "document-html-response" || typeof d?.url !== "string" || typeof d?.html !== "string") return;
+				documentSnapshots.push({
+					url: d.url,
+					html: d.html,
+					timestamp: typeof d.timestamp === "number" ? d.timestamp : Date.now()
+				});
+				if (documentSnapshots.length >= 2) {
+					const prev = documentSnapshots[documentSnapshots.length - 2];
+					const last = documentSnapshots[documentSnapshots.length - 1];
+					if (prev && last && prev.url === last.url && prev.html === last.html) {
+						documentSnapshots.pop();
+						return;
+					}
+				}
+				if (documentSnapshots.length > MAX_DOCUMENT_SNAPSHOTS) documentSnapshots.splice(0, documentSnapshots.length - MAX_DOCUMENT_SNAPSHOTS);
+				return;
+			}
+			apiSnapshots.push({
+				url: d.url,
+				payload: d.payload,
+				timestamp: typeof d.timestamp === "number" ? d.timestamp : Date.now()
+			});
+			if (apiSnapshots.length > MAX_API_SNAPSHOTS) apiSnapshots.splice(0, apiSnapshots.length - MAX_API_SNAPSHOTS);
+		});
+	}
+	function getTikTokApiSnapshots() {
+		return apiSnapshots;
+	}
+	function getTikTokDocumentSnapshots() {
+		return documentSnapshots;
+	}
 	async function callTikTokMainWorld(op, payload, options) {
 		const timeoutMs = options?.timeoutMs ?? 6e5;
 		const token = `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 		if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 		return new Promise((resolve, reject) => {
 			let t;
+			let onReply = () => {};
+			let onAbort = () => {};
 			const cleanup = () => {
 				window.removeEventListener("message", onReply);
 				options?.signal?.removeEventListener("abort", onAbort);
 				if (t !== void 0) clearTimeout(t);
 			};
-			const onAbort = () => {
+			onAbort = () => {
 				cleanup();
 				reject(new DOMException("Aborted", "AbortError"));
 			};
-			const onReply = (ev) => {
+			onReply = (ev) => {
 				if (ev.source !== window) return;
 				const d = ev.data;
 				if (d?.source !== "__rvd_tiktok_main__" || d?.token !== token || d?.op !== op) return;
@@ -20265,9 +20314,27 @@
 			}, "*");
 		});
 	}
-	//#endregion
-	//#region src/core/content/tiktok-main-world-fetch.ts
-	var TIMEOUT_MS = 6e5;
+	/** Bridges background -> isolated content -> main world via shared bridge client. */
+	function registerTikTokBlobDownloadBridge() {
+		registerTikTokApiInterceptionListener();
+		runtimeMessageInstance(CONTENT_MESSAGE_PAGE).on("tikTok blob download", async (data, { ok, fail }) => {
+			if (!/tiktok\.com/i.test(location.hostname)) return fail("Keep this tab on TikTok to download.");
+			const rowUuid = useDownloadsStore.getState().beginTikTokBlobDownload(data.baseName);
+			const { updateStatus } = useDownloadsStore.getState();
+			try {
+				await callTikTokMainWorld(RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD, data, { timeoutMs: BLOB_DOWNLOAD_TIMEOUT_MS });
+				updateStatus(rowUuid, { state: "complete" });
+				return ok({ ok: true });
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				updateStatus(rowUuid, {
+					state: "failed",
+					message
+				});
+				return fail(message);
+			}
+		});
+	}
 	/**
 	* Fetches TikTok CDN / media URLs in the page main world (cookies + referer),
 	* then returns bytes to isolated content script.
@@ -20275,7 +20342,7 @@
 	async function fetchTikTokMediaArrayBufferInPage(mediaUrl, options) {
 		if (!/tiktok\.com/i.test(location.hostname)) throw new Error("Keep this tab on TikTok.");
 		return callTikTokMainWorld(RVD_TIKTOK_BRIDGE_OP_FETCH_BUFFER, { mediaUrl }, {
-			timeoutMs: TIMEOUT_MS,
+			timeoutMs: BUFFER_FETCH_TIMEOUT_MS,
 			signal: options?.signal
 		});
 	}
@@ -20298,24 +20365,28 @@
 	* HLS uses {@link m3u8Downloader} instead.
 	*/
 	async function downloadMediaBuffer(url, uuid, updateStatus) {
-		if (isM3u8Url(url)) return m3u8Downloader.downloadBuffer(url, {
-			uriIdentityParam: "__rvd_m3u8_download",
-			onStart(abortId) {
-				abortIds[uuid] = abortId;
-				updateStatus(uuid, {
-					state: "active",
-					type: "downloading",
-					progress: 0
-				});
-			},
-			onProgress(progress) {
-				updateStatus(uuid, {
-					state: "active",
-					type: "downloading",
-					progress
-				});
-			}
-		});
+		if (isM3u8Url(url)) try {
+			return await m3u8Downloader.downloadBuffer(url, {
+				uriIdentityParam: "__rvd_m3u8_download",
+				onStart(abortId) {
+					abortIds[uuid] = abortId;
+					updateStatus(uuid, {
+						state: "active",
+						type: "downloading",
+						progress: 0
+					});
+				},
+				onProgress(progress) {
+					updateStatus(uuid, {
+						state: "active",
+						type: "downloading",
+						progress
+					});
+				}
+			});
+		} finally {
+			delete abortIds[uuid];
+		}
 		if (isTikTokMediaDownloadSourceUrl(url)) {
 			const controller = new AbortController();
 			fetchAbortControllers[uuid] = controller;
@@ -20343,45 +20414,48 @@
 			type: "downloading",
 			progress: 0
 		});
-		const res = await fetch(url, { signal: controller.signal });
-		if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
-		const len = Number(res.headers.get("Content-Length")) || 0;
-		const reader = res.body?.getReader();
-		if (!reader) throw new Error("No response body");
-		const chunks = [];
-		let received = 0;
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			if (value) {
-				chunks.push(value);
-				received += value.length;
-				if (len > 0) updateStatus(uuid, {
-					state: "active",
-					type: "downloading",
-					progress: received / len
-				});
+		try {
+			const res = await fetch(url, { signal: controller.signal });
+			if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+			const len = Number(res.headers.get("Content-Length")) || 0;
+			const reader = res.body?.getReader();
+			if (!reader) throw new Error("No response body");
+			const chunks = [];
+			let received = 0;
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				if (value) {
+					chunks.push(value);
+					received += value.length;
+					if (len > 0) updateStatus(uuid, {
+						state: "active",
+						type: "downloading",
+						progress: received / len
+					});
+				}
 			}
+			const total = chunks.reduce((s, c) => s + c.length, 0);
+			const out = new Uint8Array(total);
+			let offset = 0;
+			for (const c of chunks) {
+				out.set(c, offset);
+				offset += c.length;
+			}
+			return out.buffer;
+		} finally {
+			delete fetchAbortControllers[uuid];
 		}
-		delete fetchAbortControllers[uuid];
-		const total = chunks.reduce((s, c) => s + c.length, 0);
-		const out = new Uint8Array(total);
-		let offset = 0;
-		for (const c of chunks) {
-			out.set(c, offset);
-			offset += c.length;
-		}
-		return out.buffer;
 	}
 	var useDownloadsStore = create((set, get) => ({
 		downloads: [],
 		beginTikTokBlobDownload(baseName) {
 			const uuid = v4();
-			const format = /\.([^.]+)$/i.exec(baseName)?.[1]?.toLowerCase() === "mp3" ? "mp3" : "mp4";
+			const format = /\.([^.]+)$/.exec(baseName)?.[1]?.toLowerCase() === "mp3" ? "mp3" : "mp4";
 			const download = {
 				type: "tiktok-blob",
 				uuid,
-				title: baseName.replace(/\.[^.]+$/i, "").trim() || "Video",
+				title: baseName.replace(/\.[^.]+$/, "").trim() || "Video",
 				format,
 				quality: "Direct",
 				status: {
@@ -20509,6 +20583,7 @@
 						});
 					}
 				}));
+				delete ffmpegAbortControllers[uuid];
 			} catch (error) {
 				if (typeof ffmpegAbortControllers[uuid] !== "undefined") {
 					delete ffmpegAbortControllers[uuid];
@@ -20557,6 +20632,11 @@
 			if (fac) {
 				fac.abort();
 				delete fetchAbortControllers[uuid];
+			}
+			const ffmpegAbort = ffmpegAbortControllers[uuid];
+			if (ffmpegAbort) {
+				ffmpegAbort.abort();
+				delete ffmpegAbortControllers[uuid];
 			}
 			updateStatus(uuid, { state: "canceled" });
 		}
@@ -20656,78 +20736,9 @@
 		});
 	}
 	//#endregion
-	//#region src/core/content/tiktok-blob-download-bridge.ts
-	var BLOB_DOWNLOAD_TIMEOUT_MS = 61e4;
-	/** Bridges background -> isolated content -> main world via shared bridge client. */
-	function registerTikTokBlobDownloadBridge() {
-		runtimeMessageInstance(CONTENT_MESSAGE_PAGE).on("tikTok blob download", async (data, { ok, fail }) => {
-			if (!/tiktok\.com/i.test(location.hostname)) return fail("Keep this tab on TikTok to download.");
-			const rowUuid = useDownloadsStore.getState().beginTikTokBlobDownload(data.baseName);
-			const { updateStatus } = useDownloadsStore.getState();
-			try {
-				await callTikTokMainWorld(RVD_TIKTOK_BRIDGE_OP_BLOB_DOWNLOAD, data, { timeoutMs: BLOB_DOWNLOAD_TIMEOUT_MS });
-				updateStatus(rowUuid, { state: "complete" });
-				return ok({ ok: true });
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				updateStatus(rowUuid, {
-					state: "failed",
-					message
-				});
-				return fail(message);
-			}
-		});
-	}
-	//#endregion
-	//#region src/core/background/tiktok-html-parse.ts
-	var asR = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : null;
-	function parseHydration(html) {
-		const m = /<script\s+id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/i.exec(html);
-		if (!m?.[1]) return null;
-		try {
-			return JSON.parse(m[1].trim());
-		} catch {
-			return null;
-		}
-	}
-	function rich(st) {
-		return (asR(st.video) ? 20 : 0) + (typeof st.desc === "string" && st.desc.trim() ? 10 : 0) + (asR(st.author) ? 5 : 0) + (asR(st.music) ? 1 : 0);
-	}
-	/** Prefer `__DEFAULT_SCOPE__` → `webapp.video-detail` → `itemInfo.itemStruct`; else richest `itemStruct` with this id under the whole JSON. */
-	function itemStructFor(root, itemId) {
-		const want = String(itemId);
-		const scope = asR(root.__DEFAULT_SCOPE__);
-		let fromDetail = null;
-		if (scope) {
-			const st = asR(asR((asR(scope["webapp.video-detail"]) ?? asR(scope[Object.keys(scope).find((k) => /video-detail/i.test(k)) ?? ""] ?? null))?.itemInfo)?.itemStruct);
-			if (st && String(st.id) === want) fromDetail = st;
-		}
-		let best = null;
-		let bestR = -1;
-		const q = [root];
-		for (let i = 0; i < 4e5 && q.length; i++) {
-			const cur = q.shift();
-			if (!cur || typeof cur !== "object") continue;
-			if (Array.isArray(cur)) {
-				q.push(...cur);
-				continue;
-			}
-			const o = cur;
-			if ("itemStruct" in o) {
-				const st = asR(o.itemStruct);
-				if (st && String(st.id) === want) {
-					const r = rich(st);
-					if (r > bestR) {
-						bestR = r;
-						best = st;
-					}
-				}
-			}
-			for (const v of Object.values(o)) if (v && typeof v === "object") q.push(v);
-		}
-		if (!fromDetail) return best;
-		if (best && rich(best) > rich(fromDetail)) return best;
-		return fromDetail;
+	//#region src/core/content/parser/tiktok-single-info-builder.ts
+	function asR$1(v) {
+		return v && typeof v === "object" && !Array.isArray(v) ? v : null;
 	}
 	function fmt(url) {
 		return url.includes("mime_type=audio_mpeg") ? "mp3" : "mp4";
@@ -20763,7 +20774,6 @@
 		if (r) return r;
 		return "Video";
 	}
-	/** Same resolution whether TikTok stores `720×1280` or `1280×720`. */
 	function canonResKey(w, h) {
 		if (w <= 0 || h <= 0) return null;
 		return `${Math.min(w, h)}x${Math.max(w, h)}`;
@@ -20792,29 +20802,30 @@
 		});
 	}
 	function titleOf(item, author, music) {
-		const d = typeof item.desc === "string" ? item.desc.trim() : "";
-		if (d) return d;
-		const nick = author && typeof author.nickname === "string" ? author.nickname.trim() : "";
 		const uid = author && typeof author.uniqueId === "string" ? author.uniqueId.trim() : "";
-		if (nick && uid) return `${nick} (@${uid})`;
-		if (nick) return nick;
-		if (uid) return `@${uid}`;
+		const handle = uid ? uid.startsWith("@") ? uid : `@${uid}` : "";
+		const withHandle = (base) => {
+			if (!handle) return base;
+			if (base.includes(handle)) return base;
+			return `${handle} - ${base}`;
+		};
+		const d = typeof item.desc === "string" ? item.desc.trim() : "";
+		if (d) return withHandle(d);
+		const nick = author && typeof author.nickname === "string" ? author.nickname.trim() : "";
+		if (nick && uid) return withHandle(`${nick} (@${uid})`);
+		if (nick) return withHandle(nick);
+		if (uid) return withHandle(`@${uid}`);
 		const s = music && typeof music.title === "string" ? music.title.trim() : "";
 		const m = music && typeof music.authorName === "string" ? music.authorName.trim() : "";
-		if (s && m) return `${s} — ${m}`;
-		if (s) return s;
-		return `TikTok ${item.id}`;
+		if (s && m) return withHandle(`${s} — ${m}`);
+		if (s) return withHandle(s);
+		return withHandle(`TikTok ${item.id}`);
 	}
-	/** `/@…/video/{id}` HTML → {@link SingleInfo} (only fields read from hydration `itemStruct` / `video`). */
-	function buildTikTokFeedMediaInfoFromHtml(html, itemId) {
-		const root = parseHydration(html);
-		if (!root) return null;
-		const item = itemStructFor(root, itemId);
-		if (!item || String(item.id) !== String(itemId)) return null;
-		const video = asR(item.video);
+	function buildSingleInfoFromItem(item) {
+		const video = asR$1(item.video);
 		if (!video) return null;
-		const author = asR(item.author);
-		const music = asR(item.music);
+		const author = asR$1(item.author);
+		const music = asR$1(item.music);
 		const ttl = titleOf(item, author, music);
 		const desc = typeof item.desc === "string" && item.desc.trim() ? item.desc.trim() : void 0;
 		const dl = [];
@@ -20823,13 +20834,11 @@
 		const vw = +video.width || 0;
 		const vh = +video.height || 0;
 		const cap = videoCaption(video);
-		const ps = asR(video.PlayAddrStruct ?? video.playAddrStruct);
+		const ps = asR$1(video.PlayAddrStruct ?? video.playAddrStruct);
 		const vSz = nBytes(video.size);
-		/** Prefer play-struct byte size — `video.size` often does not match each CDN variant. */
 		const streamBytes = (ps ? nBytes(ps.DataSize ?? ps.dataSize) : void 0) ?? vSz;
 		const sw = ps ? +ps.Width || +ps.width || 0 : 0;
 		const shp = ps ? +ps.Height || +ps.height || 0 : 0;
-		/** Tag dimensions from the same object as the adaptive URLs (not only top-level `video`, which can disagree). */
 		const tw = sw > 0 && shp > 0 ? sw : vw;
 		const th = sw > 0 && shp > 0 ? shp : vh;
 		const av = (p, url, q, w, h, ext, fs) => dl.push({
@@ -20846,8 +20855,8 @@
 		const bitrateRows = [];
 		const bi = video.bitrateInfo;
 		if (Array.isArray(bi)) for (const row of bi) {
-			const r = asR(row);
-			const p = r ? asR(r.PlayAddr ?? r.playAddr) : null;
+			const r = asR$1(row);
+			const p = r ? asR$1(r.PlayAddr ?? r.playAddr) : null;
 			if (!r || !p) continue;
 			const u = pickUrl(Array.isArray(p.UrlList) ? p.UrlList.filter((u) => typeof u === "string") : []);
 			if (!u) continue;
@@ -20864,7 +20873,7 @@
 				fs: nBytes(p.DataSize ?? p.dataSize) ?? vSz
 			});
 		}
-		if (!(bitrateRows.length > 0)) {
+		if (!bitrateRows.length) {
 			const pa = typeof video.playAddr === "string" ? video.playAddr : "";
 			if (pa) av("playAddr", pa, cap, tw, th, fmt(pa), streamBytes);
 			const list = ps && Array.isArray(ps.UrlList) ? ps.UrlList.filter((u) => typeof u === "string") : [];
@@ -20889,7 +20898,7 @@
 			label: "cover",
 			url: cover
 		});
-		const z = asR(video.zoomCover);
+		const z = asR$1(video.zoomCover);
 		if (z) {
 			for (const [lb, u] of Object.entries(z)) if (typeof u === "string" && u) thumbs.push({
 				label: `${lb}px`,
@@ -20912,37 +20921,160 @@
 		};
 	}
 	//#endregion
+	//#region src/core/content/parser/tiktok-item-select.ts
+	function asR(v) {
+		return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+	}
+	function rich(st) {
+		return (asR(st.video) ? 20 : 0) + (typeof st.desc === "string" && st.desc.trim() ? 10 : 0) + (asR(st.author) ? 5 : 0) + (asR(st.music) ? 1 : 0);
+	}
+	function defaultScope(root) {
+		return asR(asR(root)?.__DEFAULT_SCOPE__);
+	}
+	function detailItemStruct(scope) {
+		if (!scope) return null;
+		const detailKey = Object.keys(scope).find((k) => k === "webapp.video-detail" || /video-detail/i.test(k));
+		if (!detailKey) return null;
+		return asR(asR(asR(scope[detailKey])?.itemInfo)?.itemStruct);
+	}
+	function bestItemStruct(root, predicate) {
+		let best = null;
+		let bestR = -1;
+		const q = [root];
+		for (let i = 0; i < 4e5 && q.length; i++) {
+			const cur = q.shift();
+			if (!cur || typeof cur !== "object") continue;
+			if (Array.isArray(cur)) {
+				q.push(...cur);
+				continue;
+			}
+			const o = cur;
+			const st = asR(o.itemStruct);
+			if (st && predicate(st)) {
+				const r = rich(st);
+				if (r > bestR) {
+					bestR = r;
+					best = st;
+				}
+			}
+			for (const v of Object.values(o)) if (v && typeof v === "object") q.push(v);
+		}
+		return best;
+	}
+	function updatedItemsFromHydration(root) {
+		const list = defaultScope(root)?.["webapp.updated-items"];
+		if (!Array.isArray(list)) return [];
+		return list.map(asR).filter((item) => Boolean(item?.video));
+	}
+	function updatedItemFor(root, itemId) {
+		const items = updatedItemsFromHydration(root);
+		if (!items.length) return null;
+		if (itemId) return items.find((it) => String(it.id ?? "") === String(itemId)) ?? null;
+		return items[0] ?? null;
+	}
+	function selectItemFromHydration(root, itemId) {
+		const item = (itemId ? (() => {
+			const want = String(itemId);
+			const fromDetail = detailItemStruct(defaultScope(root));
+			const best = bestItemStruct(root, (st) => String(st.id) === want);
+			if (!fromDetail || String(fromDetail.id) !== want) return best;
+			if (best && rich(best) > rich(fromDetail)) return best;
+			return fromDetail;
+		})() : (() => {
+			const fromDetail = detailItemStruct(defaultScope(root));
+			if (fromDetail?.video) return fromDetail;
+			return bestItemStruct(root, (st) => Boolean(st.video));
+		})()) ?? updatedItemFor(root, itemId);
+		if (!item) return null;
+		if (itemId && String(item.id) !== String(itemId)) return null;
+		return item;
+	}
+	function selectItemFromApiResponse(root, itemId) {
+		const r = asR(root);
+		if (!r) return null;
+		const candidates = [
+			r.itemList,
+			r.item_list,
+			asR(r.data)?.itemList,
+			asR(r.data)?.item_list,
+			asR(r.data)?.aweme_list
+		];
+		for (const c of candidates) {
+			if (!Array.isArray(c)) continue;
+			if (itemId) {
+				const hit = c.find((it) => {
+					const ir = asR(it);
+					return ir && String(ir.id ?? ir.aweme_id ?? "") === String(itemId);
+				});
+				if (hit) {
+					const hr = asR(hit);
+					if (hr) return hr;
+				}
+				continue;
+			}
+			for (const it of c) {
+				const ir = asR(it);
+				if (ir?.video) return ir;
+			}
+		}
+		return null;
+	}
+	function parseHydration(html) {
+		const m = /<script\s+id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/i.exec(html);
+		if (!m?.[1]) return null;
+		try {
+			return JSON.parse(m[1].trim());
+		} catch {
+			return null;
+		}
+	}
+	/** `/@…/video/{id}` HTML → {@link SingleInfo} (only fields read from hydration payload). */
+	function buildTikTokFeedMediaInfoFromHtml(html, itemId) {
+		const root = parseHydration(html);
+		if (!root) return null;
+		const item = selectItemFromHydration(root, itemId);
+		if (!item) return null;
+		return buildSingleInfoFromItem(item);
+	}
+	/** TikTok feed/detail API JSON (`itemList` / `item_list` / `aweme_list`) → {@link SingleInfo}. */
+	function buildTikTokFeedMediaInfoFromApiResponse(responseJson, itemId) {
+		const item = selectItemFromApiResponse(responseJson, itemId);
+		if (!item) return null;
+		return buildSingleInfoFromItem(item);
+	}
+	//#endregion
 	//#region src/core/content/tiktok-page-info.ts
 	var DEFAULT_MAX_WAIT_MS = 8e3;
 	function isTikTokWebDocument() {
 		return /tiktok\.com$/i.test(location.hostname);
 	}
-	function buildTikTokDetailPageUrl(uniqueId, videoId) {
-		const handle = uniqueId.replace(/^@/, "");
-		return `https://www.tiktok.com/@${encodeURIComponent(handle)}/video/${videoId}`;
+	function mediaInfoFromInterceptedApi(videoId) {
+		const snapshots = getTikTokApiSnapshots();
+		for (let i = snapshots.length - 1; i >= 0; i--) {
+			const info = buildTikTokFeedMediaInfoFromApiResponse(snapshots[i]?.payload, videoId ?? void 0);
+			if (info) return info;
+		}
+		return null;
 	}
-	async function requestPageHtmlFromMainWorld(pageUrl) {
-		return (await callTikTokMainWorld(RVD_TIKTOK_BRIDGE_OP_FETCH_PAGE_HTML, { pageUrl }, { timeoutMs: 2e4 })).html;
-	}
-	function hasHydrationPayload(html) {
-		return html.includes("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+	function mediaInfoFromInterceptedDocument(videoId) {
+		const snapshots = getTikTokDocumentSnapshots();
+		for (let i = snapshots.length - 1; i >= 0; i--) {
+			const html = snapshots[i]?.html;
+			if (typeof html !== "string" || !html.trim()) continue;
+			const info = buildTikTokFeedMediaInfoFromHtml(html, videoId ?? void 0);
+			if (info) return info;
+		}
+		return null;
 	}
 	async function mediaInfoFromPageWithRetry(maxWaitMs = DEFAULT_MAX_WAIT_MS) {
 		if (!isTikTokWebDocument()) throw new Error("This does not look like a TikTok web page.");
 		const startTime = Date.now();
-		let handle = null;
 		let videoId = null;
 		const urlMatch = window.location.href.match(/@([^/]+)\/video\/(\d+)/);
-		if (urlMatch) {
-			handle = urlMatch[1] ?? null;
-			videoId = urlMatch[2] ?? "";
-		}
-		function extractFromDom() {
+		if (urlMatch) videoId = urlMatch[2] ?? "";
+		function extractVideoIdFromDom() {
 			const videos = document.querySelectorAll("video");
-			if (!videos.length) return {
-				videoId: null,
-				handle: null
-			};
+			if (!videos.length) return null;
 			const viewportCenter = window.innerHeight / 2;
 			let closest = null;
 			let minDistance = Infinity;
@@ -20956,41 +21088,37 @@
 					closest = video;
 				}
 			}
-			if (!closest) return {
-				videoId: null,
-				handle: null
-			};
-			const id = closest.closest("[id^=\"xgwrapper-\"]")?.id.match(/(\d+)$/)?.[1] ?? null;
-			const username = (closest.closest("article[data-e2e=\"recommend-list-item-container\"]")?.querySelector("[data-e2e=\"video-author-avatar\"] img"))?.alt?.trim() ?? null;
-			return {
-				videoId: id,
-				handle: username ? `@${username}` : null
-			};
+			if (!closest) return null;
+			return closest.closest("[id^=\"xgwrapper-\"]")?.id.match(/(\d+)$/)?.[1] ?? null;
 		}
-		async function waitForVideoData() {
+		async function waitForVideoId() {
 			const retryDelay = 250;
 			while (Date.now() - startTime < maxWaitMs) {
-				const result = extractFromDom();
-				if (result.videoId && result.handle) return result;
+				const id = extractVideoIdFromDom();
+				if (id) return id;
 				await new Promise((res) => setTimeout(res, retryDelay));
 			}
-			return extractFromDom();
+			return extractVideoIdFromDom();
 		}
 		if (!urlMatch) {
-			const domData = await waitForVideoData();
-			videoId = videoId ?? domData.videoId;
-			handle = handle ?? domData.handle;
+			const domVideoId = await waitForVideoId();
+			videoId = videoId ?? domVideoId;
 		}
-		if (!videoId || !handle) throw new Error("Could not reliably detect TikTok video info from DOM.");
-		const pageUrl = buildTikTokDetailPageUrl(handle, videoId);
-		let html = await requestPageHtmlFromMainWorld(pageUrl);
-		if (!hasHydrationPayload(html)) html = await requestPageHtmlFromMainWorld(pageUrl);
-		let info = buildTikTokFeedMediaInfoFromHtml(html, videoId);
-		if (!info) info = buildTikTokFeedMediaInfoFromHtml(await requestPageHtmlFromMainWorld(pageUrl), videoId);
-		if (!info) throw new Error("Could not parse TikTok video from fetched page HTML.");
-		return info;
+		if (!videoId) {
+			const fallbackInfo = mediaInfoFromInterceptedApi() ?? mediaInfoFromInterceptedDocument();
+			if (fallbackInfo) return fallbackInfo;
+			throw new Error("Could not reliably detect TikTok video info from DOM or snapshots.");
+		}
+		while (Date.now() - startTime < maxWaitMs) {
+			const info = mediaInfoFromInterceptedApi(videoId);
+			if (info) return info;
+			const docInfo = mediaInfoFromInterceptedDocument(videoId);
+			if (docInfo) return docInfo;
+			await new Promise((res) => setTimeout(res, 250));
+		}
+		throw new Error("Could not find intercepted TikTok data for this video yet.");
 	}
-	/** Content: `get video info` -> visible DOM identity -> fetch HTML -> parse -> MediaInfo. */
+	/** Content: `get video info` -> visible DOM identity -> parse intercepted API/HTML snapshots -> MediaInfo. */
 	function registerPageVideoInfo() {
 		runtimeMessageInstance(CONTENT_MESSAGE_PAGE).on("get video info", async (_data, { ok, fail }) => {
 			try {

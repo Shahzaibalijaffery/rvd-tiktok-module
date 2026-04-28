@@ -5,7 +5,7 @@ import { options, userData } from '@/core/common/globals';
 import baseStyles from './Base.css?inline';
 import styles from './Content.css?inline';
 import ContentApp from './ContentApp';
-import { registerTikTokBlobDownloadBridge } from './tiktok-blob-download-bridge';
+import { registerTikTokBlobDownloadBridge } from './tiktok-content-bridge';
 import { registerPageVideoInfo } from './tiktok-page-info';
 
 export function initContent(): void {
@@ -35,10 +35,7 @@ export function initContent(): void {
 
         document.body.appendChild(container);
 
-        await Promise.all([
-            options.Ready,
-            userData.Ready,
-        ]);
+        await Promise.all([options.Ready, userData.Ready]);
 
         createRoot(shadowRoot).render(
             <StrictMode>

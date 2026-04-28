@@ -1,6 +1,5 @@
-import { installTikTokBlobDownloadMainWorld, wirePostMessageBridge } from './tiktok-blob-download';
+import { wireTikTokMainWorldBridge } from './tiktok-main-world-bridge';
 
 export function initContentMainWorld(): void {
-    installTikTokBlobDownloadMainWorld();
-    wirePostMessageBridge();
+    wireTikTokMainWorldBridge();
 }

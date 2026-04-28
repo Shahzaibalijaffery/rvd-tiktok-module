@@ -11,7 +11,7 @@ import { downloadFile } from '@/core/common/functions';
 import { runtimeMessageInstance } from '@/core/common/globals';
 import { isTikTokMediaDownloadSourceUrl } from '@/core/common/tiktok-cdn-url';
 import { CONTENT_MESSAGE_PAGE } from '@/core/constants';
-import { fetchTikTokMediaArrayBufferInPage } from '@/core/content/tiktok-main-world-fetch';
+import { fetchTikTokMediaArrayBufferInPage } from '@/core/content/tiktok-content-bridge';
 
 const m3u8Downloader = new M3u8Downloader({
     concurrency: 8,
@@ -39,24 +39,29 @@ async function downloadMediaBuffer(
     updateStatus: (u: string, s: ActiveDownload['status']) => void,
 ): Promise<ArrayBuffer> {
     if (isM3u8Url(url)) {
-        return m3u8Downloader.downloadBuffer(url, {
-            uriIdentityParam: '__rvd_m3u8_download',
-            onStart(abortId) {
-                abortIds[uuid] = abortId;
-                updateStatus(uuid, {
-                    state: 'active',
-                    type: 'downloading',
-                    progress: 0,
-                });
-            },
-            onProgress(progress) {
-                updateStatus(uuid, {
-                    state: 'active',
-                    type: 'downloading',
-                    progress,
-                });
-            },
-        });
+        try {
+            return await m3u8Downloader.downloadBuffer(url, {
+                uriIdentityParam: '__rvd_m3u8_download',
+                onStart(abortId) {
+                    abortIds[uuid] = abortId;
+                    updateStatus(uuid, {
+                        state: 'active',
+                        type: 'downloading',
+                        progress: 0,
+                    });
+                },
+                onProgress(progress) {
+                    updateStatus(uuid, {
+                        state: 'active',
+                        type: 'downloading',
+                        progress,
+                    });
+                },
+            });
+        }
+        finally {
+            delete abortIds[uuid];
+        }
     }
 
     if (isTikTokMediaDownloadSourceUrl(url)) {
@@ -92,46 +97,49 @@ async function downloadMediaBuffer(
         progress: 0,
     });
 
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok)
-        throw new Error(`Download failed: HTTP ${res.status}`);
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok)
+            throw new Error(`Download failed: HTTP ${res.status}`);
 
-    const len = Number(res.headers.get('Content-Length')) || 0;
-    const reader = res.body?.getReader();
-    if (!reader)
-        throw new Error('No response body');
+        const len = Number(res.headers.get('Content-Length')) || 0;
+        const reader = res.body?.getReader();
+        if (!reader)
+            throw new Error('No response body');
 
-    const chunks: Uint8Array[] = [];
-    let received = 0;
+        const chunks: Uint8Array[] = [];
+        let received = 0;
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done)
-            break;
-        if (value) {
-            chunks.push(value);
-            received += value.length;
-            if (len > 0) {
-                updateStatus(uuid, {
-                    state: 'active',
-                    type: 'downloading',
-                    progress: received / len,
-                });
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            if (value) {
+                chunks.push(value);
+                received += value.length;
+                if (len > 0) {
+                    updateStatus(uuid, {
+                        state: 'active',
+                        type: 'downloading',
+                        progress: received / len,
+                    });
+                }
             }
         }
+
+        const total = chunks.reduce((s, c) => s + c.length, 0);
+        const out = new Uint8Array(total);
+        let offset = 0;
+        for (const c of chunks) {
+            out.set(c, offset);
+            offset += c.length;
+        }
+
+        return out.buffer;
     }
-
-    delete fetchAbortControllers[uuid];
-
-    const total = chunks.reduce((s, c) => s + c.length, 0);
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const c of chunks) {
-        out.set(c, offset);
-        offset += c.length;
+    finally {
+        delete fetchAbortControllers[uuid];
     }
-
-    return out.buffer;
 }
 
 interface DownloadsState {
@@ -158,9 +166,9 @@ const useDownloadsStore = create<DownloadsState>((set, get) => ({
 
     beginTikTokBlobDownload(baseName) {
         const uuid = uuidv4();
-        const extMatch = /\.([^.]+)$/i.exec(baseName);
+        const extMatch = /\.([^.]+)$/.exec(baseName);
         const format = extMatch?.[1]?.toLowerCase() === 'mp3' ? 'mp3' : 'mp4';
-        const title = baseName.replace(/\.[^.]+$/i, '').trim() || 'Video';
+        const title = baseName.replace(/\.[^.]+$/, '').trim() || 'Video';
         const download: ActiveDownload = {
             type: 'tiktok-blob',
             uuid,
@@ -306,6 +314,7 @@ const useDownloadsStore = create<DownloadsState>((set, get) => ({
                     });
                 },
             }));
+            delete ffmpegAbortControllers[uuid];
         }
         catch (error) {
             if (typeof ffmpegAbortControllers[uuid] !== 'undefined') {
@@ -362,6 +371,12 @@ const useDownloadsStore = create<DownloadsState>((set, get) => ({
         if (fac) {
             fac.abort();
             delete fetchAbortControllers[uuid];
+        }
+
+        const ffmpegAbort = ffmpegAbortControllers[uuid];
+        if (ffmpegAbort) {
+            ffmpegAbort.abort();
+            delete ffmpegAbortControllers[uuid];
         }
 
         updateStatus(uuid, { state: 'canceled' });

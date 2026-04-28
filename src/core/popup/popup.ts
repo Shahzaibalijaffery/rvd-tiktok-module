@@ -9,8 +9,6 @@ import { getActiveTab, urlMatchesTikTok } from '@/core/common/helpers';
 import { CONTENT_MESSAGE_PAGE } from '@/core/constants';
 import { downloadFile } from '../common/functions';
 
-let callpopup =0;
-
 async function mediaInfoFromTab(tabId: number, url: string): Promise<MediaInfo> {
     const response = await runtimeMessageInstance('popup').send<{ url: string }, { info: MediaInfo }>(
         CONTENT_MESSAGE_PAGE,
@@ -40,7 +38,6 @@ const popupModule = {
     urlMatches(url) {
         return urlMatchesTikTok(url);
     },
-    
 
     async getInfo(url, tabId, _tab) {
         if (typeof tabId !== 'number') {

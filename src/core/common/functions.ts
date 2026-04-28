@@ -144,6 +144,9 @@ type FilenameOptions = {
 };
 
 /**
+ * @param page Runtime sender page namespace.
+ * @param url Source media URL.
+ * @param filenameOptions Optional filename construction options.
  * @param targetTabId Tab where TikTok runs — required for main-world blob downloads from the popup
  *        (content-script sends can omit; background uses `sender.tab`).
  */

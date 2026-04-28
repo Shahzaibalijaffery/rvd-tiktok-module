@@ -1,24 +1,24 @@
+import type { TikTokBlobDownloadPayload } from '@/core/content-main-world/tiktok-main-world-bridge';
 // src/core/background/background.ts
 import type { Message, MessageListener, MessageResponse } from '@/system/types';
-import type { TikTokBlobDownloadPayload } from '@/core/content-main-world/tiktok-blob-download';
+import { isTikTokMediaDownloadSourceUrl } from '@/core/common/tiktok-cdn-url';
 import { CONTENT_MESSAGE_PAGE } from '@/core/constants';
 import { RUNTIME_MESSAGE_NAMESPACE } from '@/module-config';
-import { onRuntimeMessage } from '@/system/background';
 
-import { isTikTokMediaDownloadSourceUrl } from '@/core/common/tiktok-cdn-url';
+import { onRuntimeMessage } from '@/system/background';
 
 const RE_INVALID_FILENAME = /invalid filename/i;
 const TAB_SEND_RETRIES = 5;
 const TAB_SEND_BASE_DELAY_MS = 120;
 
-type DownloadPayload = {
+interface DownloadPayload {
     url: string;
     filename?: string;
     saveAs?: boolean;
     conflictAction?: chrome.downloads.FilenameConflictAction;
     /** Popup-initiated TikTok downloads need the TikTok tab id. */
     tabId?: number;
-};
+}
 
 function formatCaughtError(e: unknown): string {
     if (e instanceof Error && typeof e.message === 'string' && e.message.trim())

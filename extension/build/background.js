@@ -1,4 +1,22 @@
 (function() {
+	//#region src/core/common/tiktok-cdn-url.ts
+	/** Hostnames that expect TikTok first-party / cookie context when fetched. */
+	function isTikTokMediaDownloadSourceUrl(url) {
+		try {
+			const u = new URL(url);
+			if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+			const h = u.hostname.toLowerCase();
+			if (/\.tiktokcdn\.com$/i.test(h) || /\.tiktokcdn-[^.]+\.com$/i.test(h)) return true;
+			if (/\.tiktok\.com$/i.test(h)) return true;
+			if (/\.tiktokv\.com$/i.test(h)) return true;
+			if (/\.muscdn\.com$/i.test(h)) return true;
+			if (/ies-music/i.test(h) && /tiktok|byte/i.test(h)) return true;
+			return false;
+		} catch {
+			return false;
+		}
+	}
+	//#endregion
 	//#region src/module-config.ts
 	var MODULE_NAME = "tiktok";
 	var RUNTIME_MESSAGE_NAMESPACE = `module:${MODULE_NAME}`;
@@ -42,24 +60,6 @@
 				return true;
 			} else sendResponse(response);
 		});
-	}
-	//#endregion
-	//#region src/core/common/tiktok-cdn-url.ts
-	/** Hostnames that expect TikTok first-party / cookie context when fetched. */
-	function isTikTokMediaDownloadSourceUrl(url) {
-		try {
-			const u = new URL(url);
-			if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-			const h = u.hostname.toLowerCase();
-			if (/\.tiktokcdn\.com$/i.test(h) || /\.tiktokcdn-[^.]+\.com$/i.test(h)) return true;
-			if (/\.tiktok\.com$/i.test(h)) return true;
-			if (/\.tiktokv\.com$/i.test(h)) return true;
-			if (/\.muscdn\.com$/i.test(h)) return true;
-			if (/ies-music/i.test(h) && /tiktok|byte/i.test(h)) return true;
-			return false;
-		} catch {
-			return false;
-		}
 	}
 	//#endregion
 	//#region src/core/background/background.ts
