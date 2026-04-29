@@ -22446,7 +22446,7 @@
 	* Chromium uses `net::IsSafePortableRelativePath` — non-ASCII titles often fail on Windows;
 	* we emit ASCII-only relative paths. See chrome.downloads.download filename rules.
 	*/
-	var KNOWN_DOWNLOAD_EXT = /\.(?:mp4|mp3|mpd|m3u8|webm|mkv|m4v|mov|jpg|jpeg|png|gif|webp|aac|wav|json)$/i;
+	var KNOWN_DOWNLOAD_EXT = /\.(?:mp4|mp3|mpd|m3u8|webm|mkv|m4v|mov|jpg|jpeg|png|gif|webp|avif|aac|wav|json)$/i;
 	var CHROME_RELATIVE_MAX = 200;
 	var WIN_RESERVED_BASE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 	var RE_LEADING_SLASHES = /^[/\\]+/g;
@@ -22524,8 +22524,10 @@
 	* @param filenameOptions Optional filename construction options.
 	* @param targetTabId Tab where TikTok runs — required for main-world blob downloads from the popup
 	*        (content-script sends can omit; background uses `sender.tab`).
+	* @param chromeDirectForTikTokCdn Use `chrome.downloads` instead of main-world fetch for TikTok CDN URLs
+	*        (needed for thumbnails whose CDN path does not allow CORS from tiktok.com).
 	*/
-	async function downloadFile(page, url, filenameOptions, targetTabId) {
+	async function downloadFile(page, url, filenameOptions, targetTabId, chromeDirectForTikTokCdn) {
 		await options$1.Ready;
 		let filename;
 		if (filenameOptions) if ("filename" in filenameOptions) {
@@ -22542,7 +22544,8 @@
 			filename,
 			saveAs: options$1.saveAsDialogEnabled,
 			conflictAction: options$1.filenameOnConflict,
-			tabId: targetTabId
+			tabId: targetTabId,
+			...chromeDirectForTikTokCdn ? { chromeDirectForTikTokCdn: true } : {}
 		});
 		if (response.error) throw new Error(response.message);
 	}
@@ -22612,10 +22615,11 @@
 		},
 		async downloadThumbnail(thumbnail, info) {
 			if (!info || info.type !== "single") throw new Error("Thumbnails are only available for a single video page.");
-			const filename = `${info.title} thumbnail [${thumbnail.label}].jpg`;
+			const ext = (thumbnail.url.match(/\.(avif|webp|jpe?g|png)(?:\?|$)/i)?.[1] ?? "jpg").toLowerCase().replace("jpeg", "jpg");
+			const filename = `${info.title} thumbnail [${thumbnail.label}].${ext}`;
 			const activeTab = await getActiveTab();
 			if (typeof activeTab?.id !== "number") throw new TypeError("No active tab. Keep the TikTok tab focused and try again.");
-			await downloadFile("popup", thumbnail.url, { filename }, activeTab.id);
+			await downloadFile("popup", thumbnail.url, { filename }, activeTab.id, true);
 		}
 	};
 	//#endregion
@@ -29774,12 +29778,18 @@
 	}
 	//#endregion
 	//#region src/app/popup/pages/download/Downloads/Thumbnails.tsx
+	function thumbnailSelectValue(t) {
+		const { width: w, height: h } = t;
+		if (typeof w === "number" && typeof h === "number" && Number.isFinite(w) && Number.isFinite(h)) return `${w}x${h}`;
+		return `label:${t.label}`;
+	}
 	function ThumbnailsSinglePicker({ info, downloadThumbnail }) {
 		const { thumbnails, thumbnailUrl } = info;
 		const options = thumbnails.map((thumbnail) => {
+			const dim = typeof thumbnail.width === "number" && typeof thumbnail.height === "number" ? ` (${thumbnail.width}x${thumbnail.height})` : "";
 			return {
-				value: `${thumbnail.width}x${thumbnail.height}`,
-				label: `${thumbnail.label} (${thumbnail.width}x${thumbnail.height})`
+				value: thumbnailSelectValue(thumbnail),
+				label: `${thumbnail.label}${dim}`
 			};
 		});
 		const defaultValue = options.at(-1).value;
@@ -29810,9 +29820,7 @@
 				loading: downloading,
 				onClick: async () => {
 					setDownloading(true);
-					downloadThumbnail(thumbnails.find((thumbnail) => {
-						return `${thumbnail.width}x${thumbnail.height}` === selectedQuality;
-					}));
+					downloadThumbnail(thumbnails.find((t) => thumbnailSelectValue(t) === selectedQuality));
 					setDownloading(false);
 				}
 			})

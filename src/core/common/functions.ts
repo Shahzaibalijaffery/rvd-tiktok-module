@@ -8,7 +8,7 @@ import { options, runtimeMessageInstance } from './globals';
  * Chromium uses `net::IsSafePortableRelativePath` — non-ASCII titles often fail on Windows;
  * we emit ASCII-only relative paths. See chrome.downloads.download filename rules.
  */
-const KNOWN_DOWNLOAD_EXT = /\.(?:mp4|mp3|mpd|m3u8|webm|mkv|m4v|mov|jpg|jpeg|png|gif|webp|aac|wav|json)$/i;
+const KNOWN_DOWNLOAD_EXT = /\.(?:mp4|mp3|mpd|m3u8|webm|mkv|m4v|mov|jpg|jpeg|png|gif|webp|avif|aac|wav|json)$/i;
 
 const CHROME_RELATIVE_MAX = 200;
 
@@ -149,12 +149,15 @@ type FilenameOptions = {
  * @param filenameOptions Optional filename construction options.
  * @param targetTabId Tab where TikTok runs — required for main-world blob downloads from the popup
  *        (content-script sends can omit; background uses `sender.tab`).
+ * @param chromeDirectForTikTokCdn Use `chrome.downloads` instead of main-world fetch for TikTok CDN URLs
+ *        (needed for thumbnails whose CDN path does not allow CORS from tiktok.com).
  */
 export async function downloadFile(
     page: Exclude<MessagePage, 'background'>,
     url: string,
     filenameOptions?: FilenameOptions,
     targetTabId?: number,
+    chromeDirectForTikTokCdn?: boolean,
 ) {
     await options.Ready;
 
@@ -180,6 +183,7 @@ export async function downloadFile(
         saveAs: options.saveAsDialogEnabled,
         conflictAction: options.filenameOnConflict,
         tabId: targetTabId,
+        ...(chromeDirectForTikTokCdn ? { chromeDirectForTikTokCdn: true } : {}),
     });
 
     if (response.error)

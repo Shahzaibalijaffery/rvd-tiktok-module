@@ -16,8 +16,8 @@ interface DownloadPayload {
     filename?: string;
     saveAs?: boolean;
     conflictAction?: chrome.downloads.FilenameConflictAction;
-    /** Popup-initiated TikTok downloads need the TikTok tab id. */
     tabId?: number;
+    chromeDirectForTikTokCdn?: boolean;
 }
 
 function formatCaughtError(e: unknown): string {
@@ -118,7 +118,7 @@ export async function initBackground() {
         'download': MessageListener<DownloadPayload, { id: number }>;
         'open downloads folder': MessageListener;
     } = {
-        'download': async ({ url, filename, saveAs, conflictAction, tabId: dataTabId }, { ok, fail, sender }) => {
+        'download': async ({ url, filename, saveAs, conflictAction, tabId: dataTabId, chromeDirectForTikTokCdn }, { ok, fail, sender }) => {
             const saveAsResolved = typeof saveAs !== 'undefined' ? saveAs : false;
 
             const buildDirectOptions = (withFilename: boolean): chrome.downloads.DownloadOptions => {
@@ -134,8 +134,8 @@ export async function initBackground() {
             };
 
             try {
-                // TikTok media URLs must go through main-world flow only.
-                if (isTikTokMediaDownloadSourceUrl(url)) {
+                // TikTok *video* URLs need main-world blob save; some CDN stills (zoom covers) lack CORS for page fetch.
+                if (isTikTokMediaDownloadSourceUrl(url) && !chromeDirectForTikTokCdn) {
                     const tabId = await resolveDownloadTargetTabId(dataTabId, sender);
 
                     if (typeof tabId !== 'number') {

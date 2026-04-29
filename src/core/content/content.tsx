@@ -1,35 +1,36 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
 
-import { options, userData } from '@/core/common/globals';
-import baseStyles from './Base.css?inline';
-import styles from './Content.css?inline';
-import ContentApp from './ContentApp';
-import { registerTikTokBlobDownloadBridge } from './tiktok-content-bridge';
-import { registerPageVideoInfo } from './tiktok-page-info';
+import { options, userData } from "@/core/common/globals";
+import baseStyles from "./Base.css?inline";
+import styles from "./Content.css?inline";
+import ContentApp from "./ContentApp";
+import { registerTikTokBlobDownloadBridge } from "./tiktok-content-bridge";
+import { initTikTokFeedDownloadButtons } from "./tiktok-feed-download-button";
+import { registerPageVideoInfo } from "./tiktok-page-info";
 
 export function initContent(): void {
     let mounted = false;
 
     registerTikTokBlobDownloadBridge();
     registerPageVideoInfo();
+    initTikTokFeedDownloadButtons();
 
     async function mount(): Promise<void> {
-        if (mounted)
-            return;
+        if (mounted) return;
 
         mounted = true;
 
-        const container = document.createElement('div');
-        container.id = 'rvd-tt-content-root';
+        const container = document.createElement("div");
+        container.id = "rvd-tt-content-root";
 
-        const baseStyle = document.createElement('style');
+        const baseStyle = document.createElement("style");
         baseStyle.textContent = baseStyles;
         document.head.appendChild(baseStyle);
 
-        const shadowRoot = container.attachShadow({ mode: 'open' });
+        const shadowRoot = container.attachShadow({ mode: "open" });
 
-        const style = document.createElement('style');
+        const style = document.createElement("style");
         style.textContent = styles;
         shadowRoot.appendChild(style);
 

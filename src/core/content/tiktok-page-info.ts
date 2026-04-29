@@ -33,6 +33,10 @@ function mediaInfoFromInterceptedDocument(videoId?: string | null): MediaInfo | 
     return null;
 }
 
+export function mediaInfoFromSnapshots(videoId?: string | null): MediaInfo | null {
+    return mediaInfoFromInterceptedApi(videoId) ?? mediaInfoFromInterceptedDocument(videoId);
+}
+
 async function mediaInfoFromPageWithRetry(maxWaitMs: number = DEFAULT_MAX_WAIT_MS): Promise<MediaInfo> {
     if (!isTikTokWebDocument()) {
         throw new Error('This does not look like a TikTok web page.');

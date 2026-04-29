@@ -9,6 +9,13 @@ import CustomSelect from '@/app/components/CustomSelect';
 import MessageScreen from '@/app/components/MessageScreen';
 import { useVideoStore } from '@/app/popup/video-store';
 
+function thumbnailSelectValue(t: Thumbnail): string {
+    const { width: w, height: h } = t;
+    if (typeof w === 'number' && typeof h === 'number' && Number.isFinite(w) && Number.isFinite(h))
+        return `${w}x${h}`;
+    return `label:${t.label}`;
+}
+
 function ThumbnailsSinglePicker({
     info,
     downloadThumbnail,
@@ -19,9 +26,13 @@ function ThumbnailsSinglePicker({
     const { thumbnails, thumbnailUrl } = info;
 
     const options = thumbnails!.map((thumbnail) => {
+        const dim
+            = typeof thumbnail.width === 'number' && typeof thumbnail.height === 'number'
+                ? ` (${thumbnail.width}x${thumbnail.height})`
+                : '';
         return {
-            value: `${thumbnail.width}x${thumbnail.height}`,
-            label: `${thumbnail.label} (${thumbnail.width}x${thumbnail.height})`,
+            value: thumbnailSelectValue(thumbnail),
+            label: `${thumbnail.label}${dim}`,
         };
     });
 
@@ -57,12 +68,9 @@ function ThumbnailsSinglePicker({
                 onClick={async () => {
                     setDownloading(true);
 
-                    const thumbnail = thumbnails!.find((thumbnail) => {
-                        return (
-                            `${thumbnail.width}x${thumbnail.height}`
-                            === selectedQuality
-                        );
-                    });
+                    const thumbnail = thumbnails!.find(
+                        t => thumbnailSelectValue(t) === selectedQuality,
+                    );
 
                     downloadThumbnail(thumbnail!);
 

@@ -121,14 +121,16 @@ const popupModule = {
             throw new Error('Thumbnails are only available for a single video page.');
         }
 
-        const filename = `${info.title} thumbnail [${thumbnail.label}].jpg`;
+        const extMatch = thumbnail.url.match(/\.(avif|webp|jpe?g|png)(?:\?|$)/i);
+        const ext = (extMatch?.[1] ?? 'jpg').toLowerCase().replace('jpeg', 'jpg');
+        const filename = `${info.title} thumbnail [${thumbnail.label}].${ext}`;
 
         const activeTab = await getActiveTab();
         if (typeof activeTab?.id !== 'number') {
             throw new TypeError('No active tab. Keep the TikTok tab focused and try again.');
         }
 
-        await downloadFile('popup', thumbnail.url, { filename }, activeTab.id);
+        await downloadFile('popup', thumbnail.url, { filename }, activeTab.id, true);
     },
 } satisfies PopupModule;
 

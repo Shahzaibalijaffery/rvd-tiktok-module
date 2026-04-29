@@ -125,7 +125,7 @@
 	}
 	async function initBackground() {
 		onRuntimeMessage({
-			"download": async ({ url, filename, saveAs, conflictAction, tabId: dataTabId }, { ok, fail, sender }) => {
+			"download": async ({ url, filename, saveAs, conflictAction, tabId: dataTabId, chromeDirectForTikTokCdn }, { ok, fail, sender }) => {
 				const saveAsResolved = typeof saveAs !== "undefined" ? saveAs : false;
 				const buildDirectOptions = (withFilename) => {
 					const o = {
@@ -137,7 +137,7 @@
 					return o;
 				};
 				try {
-					if (isTikTokMediaDownloadSourceUrl(url)) {
+					if (isTikTokMediaDownloadSourceUrl(url) && !chromeDirectForTikTokCdn) {
 						const tabId = await resolveDownloadTargetTabId(dataTabId, sender);
 						if (typeof tabId !== "number") return fail("No TikTok tab id available for main-world download.");
 						try {
