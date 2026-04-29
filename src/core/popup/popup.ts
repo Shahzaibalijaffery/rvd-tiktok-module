@@ -3,7 +3,7 @@
 import type { M3u8AddDownloadType, M3u8Mp3AddDownloadType } from '../types';
 
 import type { Download, MediaInfo, PopupModule } from '@/system/types';
-import { downloadResolutionShortSide } from '@/core/common/download-quality-tier';
+import { downloadResolutionShortSide } from '@/core/common/functions';
 import { options, runtimeMessageInstance } from '@/core/common/globals';
 import { getActiveTab, urlMatchesTikTok } from '@/core/common/helpers';
 import { CONTENT_MESSAGE_PAGE } from '@/core/constants';

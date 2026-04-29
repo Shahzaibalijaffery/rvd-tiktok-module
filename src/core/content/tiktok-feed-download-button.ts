@@ -1,10 +1,11 @@
 import type { Download } from '@/system/types';
 import {
     downloadQualityCaption,
+    downloadFile,
+    downloadResolutionShortSide,
     qualityBadgeText,
     qualityLabelFromDownload,
-} from '@/core/common/download-quality-tier';
-import { downloadFile } from '@/core/common/functions';
+} from '@/core/common/functions';
 import { CONTENT_MESSAGE_PAGE } from '@/core/constants';
 import useDownloadsStore from './ActiveDownloads/downloads-store';
 import { mediaInfoFromSnapshots } from './tiktok-page-info';
@@ -30,13 +31,11 @@ function ensureButtonStyle(): void {
     style.id = STYLE_ID;
     style.textContent = `
 .${WRAP_CLASS}{position:relative}
-.${MENU_CLASS}{position:absolute;right:100%;top:0;display:none;min-width:170px;background:#111827;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:6px;z-index:2147483647;box-shadow:0 10px 24px rgba(0,0,0,.35)}
+.${MENU_CLASS}{position:absolute;right:100%;top:0;display:none;min-width:170px;background:#000000;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:6px;z-index:2147483647;box-shadow:0 10px 24px rgba(0,0,0,.35)}
 .${MENU_CLASS}.open{display:block}
-.${MENU_CLASS} button.rvd-tt-feed-menu-row{display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;border:0;background:transparent;color:#fff;padding:8px 10px;border-radius:8px;font:600 12px/1.2 sans-serif;cursor:pointer;text-align:left}
+.${MENU_CLASS} button.rvd-tt-feed-menu-row{display:flex;align-items:center;justify-content:flex-start;gap:0;width:100%;border:0;background:transparent;color:#fff;padding:8px 10px;border-radius:8px;font:600 12px/1.2 sans-serif;cursor:pointer;text-align:left}
 .${MENU_CLASS} button.rvd-tt-feed-menu-row:hover{background:rgba(255,255,255,.12)}
 .${MENU_CLASS} button.rvd-tt-feed-menu-row:disabled{opacity:.65;cursor:default}
-.${MENU_CLASS} .rvd-tt-feed-menu-icon{flex-shrink:0;display:inline-flex;color:#fff;line-height:0}
-.${MENU_CLASS} .rvd-tt-feed-menu-icon .rvd-tt-feed-download-svg{display:block}
 .${MENU_CLASS} .rvd-tt-feed-menu-label{flex:1;min-width:0}
 .${MENU_CLASS} .rvd-tt-feed-menu-meta{opacity:.85;font-size:11px;font-weight:600;white-space:nowrap}
 .${BTN_CLASS} .rvd-tt-feed-main-icon{display:inline-flex;color:#fff;line-height:0;align-items:center;justify-content:center}
@@ -90,6 +89,25 @@ function popupStyleQualityLine(d: Download): string {
     return [fmt, caption, badge].join(' · ');
 }
 
+function sortByQualityDesc(a: Download, b: Download): number {
+    const pa = downloadResolutionShortSide(a);
+    const pb = downloadResolutionShortSide(b);
+    if (pa !== pb)
+        return pb - pa;
+
+    const ha = typeof a.height === 'number' ? a.height : 0;
+    const hb = typeof b.height === 'number' ? b.height : 0;
+    if (ha !== hb)
+        return hb - ha;
+
+    const wa = typeof a.width === 'number' ? a.width : 0;
+    const wb = typeof b.width === 'number' ? b.width : 0;
+    if (wa !== wb)
+        return wb - wa;
+
+    return String(a.quality).localeCompare(String(b.quality));
+}
+
 function buildNativeLikeButton(actionBar: HTMLElement, videoId: string): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -140,7 +158,7 @@ function renderMenu(
         const item = document.createElement('button');
         item.className = 'rvd-tt-feed-menu-row';
         item.disabled = true;
-        item.innerHTML = `<span class="rvd-tt-feed-menu-icon">${DOWNLOAD_ICON_SVG}</span><span class="rvd-tt-feed-menu-label">Play video to load options</span>`;
+        item.innerHTML = `<span class="rvd-tt-feed-menu-label">Play video to load options</span>`;
         menu.appendChild(item);
         return;
     }
@@ -152,13 +170,13 @@ function renderMenu(
             return false;
         seen.add(d.id);
         return true;
-    });
+    }).sort(sortByQualityDesc);
 
     for (const d of list) {
         const item = document.createElement('button');
         item.className = 'rvd-tt-feed-menu-row';
         const line = popupStyleQualityLine(d);
-        item.innerHTML = `<span class="rvd-tt-feed-menu-icon">${DOWNLOAD_ICON_SVG}</span><span class="rvd-tt-feed-menu-label">${escapeHtml(line)}</span>`;
+        item.innerHTML = `<span class="rvd-tt-feed-menu-label">${escapeHtml(line)}</span>`;
         item.addEventListener('click', async (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
@@ -180,7 +198,7 @@ function renderMenu(
     if (mp3Source) {
         const mp3 = document.createElement('button');
         mp3.className = 'rvd-tt-feed-menu-row';
-        mp3.innerHTML = `<span class="rvd-tt-feed-menu-icon">${DOWNLOAD_ICON_SVG}</span><span class="rvd-tt-feed-menu-label">MP3</span><span class="rvd-tt-feed-menu-meta">128kbps</span>`;
+        mp3.innerHTML = `<span class="rvd-tt-feed-menu-label">MP3</span><span class="rvd-tt-feed-menu-meta">128kbps</span>`;
         mp3.addEventListener('click', (ev) => {
             ev.preventDefault();
             ev.stopPropagation();

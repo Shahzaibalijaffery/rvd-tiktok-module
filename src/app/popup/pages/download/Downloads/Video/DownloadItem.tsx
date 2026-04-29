@@ -10,7 +10,7 @@ import {
     downloadQualityCaption,
     qualityBadgeText,
     qualityLabelFromDownload,
-} from '@/core/common/download-quality-tier';
+} from '@/core/common/functions';
 import { formatBytes } from '@/core/common/helpers';
 import { isTikTokMediaDownloadSourceUrl } from '@/core/common/tiktok-cdn-url';
 import { cn, getFileSize } from '@/system/lib/utils';

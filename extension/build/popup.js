@@ -17149,35 +17149,72 @@
 	};
 	var create = ((createState) => createState ? createImpl(createState) : createImpl);
 	//#endregion
-	//#region src/core/common/download-quality-tier.ts
-	/** Short-side (or lone non-zero side) in pixels — used for sort, `720p` caption, and tier when `videoQuality` is absent. */
-	function downloadResolutionShortSide(d) {
-		const w = d.width ?? 0;
-		const h = d.height ?? 0;
-		if (w <= 0 && h <= 0) return 0;
-		if (w > 0 && h > 0) return Math.min(w, h);
-		return Math.max(w, h);
+	//#region node_modules/filename-reserved-regex/index.js
+	function filenameReservedRegex() {
+		return /[<>:"/\\|?*\u0000-\u001F]|[. ]$/g;
 	}
-	/** When `videoQuality` is absent (e.g. TikTok HTML parse), infer tier from `width` / `height`. */
-	function qualityLabelFromDownload(d) {
-		if (d.videoQuality?.label) return d.videoQuality.label;
-		const n = downloadResolutionShortSide(d);
-		if (!Number.isFinite(n) || n <= 0) return "hd";
-		if (n >= 2160) return "4k";
-		if (n >= 1080) return "1080";
-		if (n >= 720) return "hd";
-		return "sd";
+	function windowsReservedNameRegex() {
+		return /^(con|prn|aux|nul|com\d|lpt\d)$/i;
 	}
-	function qualityBadgeText(label) {
-		if (label === "1080") return "HD";
-		return label;
+	//#endregion
+	//#region node_modules/filenamify/filenamify.js
+	var MAX_FILENAME_LENGTH = 100;
+	var reRelativePath = /^\.+(\\|\/)|^\.+$/;
+	var reTrailingDotsAndSpaces = /[. ]+$/;
+	var reControlChars = /[\p{Control}\p{Format}\p{Zl}\p{Zp}\uFFF0-\uFFFF]/gu;
+	var reControlCharsTest = /[\p{Control}\p{Format}\p{Zl}\p{Zp}\uFFF0-\uFFFF]/u;
+	var isZeroWidthJoiner = (char) => char === "‍";
+	var reRepeatedReservedCharacters = /([<>:"/\\|?*\u0000-\u001F]){2,}/g;
+	var reReplacementReservedCharacters = /[<>:"/\\|?*\u0000-\u001F]/;
+	var reUnicodeWhitespace = /[\t\n\r\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]+/g;
+	var segmenter;
+	function getSegmenter() {
+		segmenter ??= new Intl.Segmenter(void 0, { granularity: "grapheme" });
+		return segmenter;
 	}
-	/** Secondary line: `720p` from dimensions, else caption string. */
-	function downloadQualityCaption(d) {
-		if (d.type === "AudioOnly") return d.quality.split(" · ")[0]?.trim() || d.quality;
-		const n = downloadResolutionShortSide(d);
-		if (n > 0) return `${n}p`;
-		return d.quality;
+	function truncateFilename(filename, maxLength) {
+		if (filename.length <= maxLength) return filename;
+		const extensionIndex = filename.lastIndexOf(".");
+		if (extensionIndex === -1) return truncateByGraphemeBudget(filename, maxLength);
+		const base = filename.slice(0, extensionIndex);
+		const extension = filename.slice(extensionIndex);
+		return truncateByGraphemeBudget(base, Math.max(0, maxLength - extension.length)).replace(/ +$/, "") + extension;
+	}
+	function filenamify(string, options = {}) {
+		if (typeof string !== "string") throw new TypeError("Expected a string");
+		const replacement = options.replacement ?? "!";
+		const hasReservedChars = reReplacementReservedCharacters.test(replacement);
+		const hasControlChars = [...replacement].some((char) => reControlCharsTest.test(char) && !isZeroWidthJoiner(char));
+		if (hasReservedChars || hasControlChars) throw new Error("Replacement string cannot contain reserved filename characters");
+		string = string.normalize("NFC");
+		string = string.replaceAll(reUnicodeWhitespace, " ");
+		if (replacement.length > 0) string = string.replaceAll(reRepeatedReservedCharacters, "$1");
+		string = string.replace(reTrailingDotsAndSpaces, "");
+		string = string.replace(reRelativePath, replacement);
+		string = string.replace(filenameReservedRegex(), replacement);
+		string = string.replaceAll(reControlChars, (char) => isZeroWidthJoiner(char) ? char : replacement);
+		string = string.replace(reTrailingDotsAndSpaces, "");
+		if (string.length === 0) {
+			string = replacement.replace(reTrailingDotsAndSpaces, "");
+			if (string.length === 0 && replacement.length > 0) string = "!";
+		}
+		const allowedLength = typeof options.maxLength === "number" ? options.maxLength : MAX_FILENAME_LENGTH;
+		string = truncateFilename(string, allowedLength);
+		string = string.replace(reTrailingDotsAndSpaces, "");
+		if (windowsReservedNameRegex().test(string)) string += replacement;
+		return string;
+	}
+	function truncateByGraphemeBudget(input, budget) {
+		if (input.length <= budget) return input;
+		let count = 0;
+		let output = "";
+		for (const { segment } of getSegmenter().segment(input)) {
+			const next = count + segment.length;
+			if (next > budget) break;
+			output += segment;
+			count = next;
+		}
+		return output;
 	}
 	//#endregion
 	//#region src/core/config.ts
@@ -22341,106 +22378,6 @@
 	var options$1 = Store_default("__options__", DEFAULT_OPTIONS);
 	var userData = Store_default("__user_data__", DEFAULT_USER_DATA);
 	//#endregion
-	//#region src/core/common/helpers.ts
-	function urlMatchesTikTok(url) {
-		try {
-			const u = new URL(url);
-			if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-			return /tiktok\.com$/i.test(u.hostname);
-		} catch {
-			return false;
-		}
-	}
-	async function getActiveTab() {
-		const [tab] = await chrome.tabs.query({
-			active: true,
-			currentWindow: true
-		});
-		return tab ?? null;
-	}
-	function formatBytes(bytes) {
-		const sizes = [
-			"B",
-			"KB",
-			"MB",
-			"GB"
-		];
-		const i = Math.floor(Math.log(bytes) / Math.log(1024));
-		return bytes === 0 ? "0B" : `${Number.parseFloat((bytes / 1024 ** i).toFixed(1))}${sizes[i]}`;
-	}
-	//#endregion
-	//#region src/core/constants.ts
-	/** Content script endpoint for module runtime messages (must match `MODULE_NAME`). */
-	var CONTENT_MESSAGE_PAGE = `content/${MODULE_NAME}`;
-	//#endregion
-	//#region node_modules/filename-reserved-regex/index.js
-	function filenameReservedRegex() {
-		return /[<>:"/\\|?*\u0000-\u001F]|[. ]$/g;
-	}
-	function windowsReservedNameRegex() {
-		return /^(con|prn|aux|nul|com\d|lpt\d)$/i;
-	}
-	//#endregion
-	//#region node_modules/filenamify/filenamify.js
-	var MAX_FILENAME_LENGTH = 100;
-	var reRelativePath = /^\.+(\\|\/)|^\.+$/;
-	var reTrailingDotsAndSpaces = /[. ]+$/;
-	var reControlChars = /[\p{Control}\p{Format}\p{Zl}\p{Zp}\uFFF0-\uFFFF]/gu;
-	var reControlCharsTest = /[\p{Control}\p{Format}\p{Zl}\p{Zp}\uFFF0-\uFFFF]/u;
-	var isZeroWidthJoiner = (char) => char === "‍";
-	var reRepeatedReservedCharacters = /([<>:"/\\|?*\u0000-\u001F]){2,}/g;
-	var reReplacementReservedCharacters = /[<>:"/\\|?*\u0000-\u001F]/;
-	var reUnicodeWhitespace = /[\t\n\r\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]+/g;
-	var segmenter;
-	function getSegmenter() {
-		segmenter ??= new Intl.Segmenter(void 0, { granularity: "grapheme" });
-		return segmenter;
-	}
-	function truncateFilename(filename, maxLength) {
-		if (filename.length <= maxLength) return filename;
-		const extensionIndex = filename.lastIndexOf(".");
-		if (extensionIndex === -1) return truncateByGraphemeBudget(filename, maxLength);
-		const base = filename.slice(0, extensionIndex);
-		const extension = filename.slice(extensionIndex);
-		return truncateByGraphemeBudget(base, Math.max(0, maxLength - extension.length)).replace(/ +$/, "") + extension;
-	}
-	function filenamify(string, options = {}) {
-		if (typeof string !== "string") throw new TypeError("Expected a string");
-		const replacement = options.replacement ?? "!";
-		const hasReservedChars = reReplacementReservedCharacters.test(replacement);
-		const hasControlChars = [...replacement].some((char) => reControlCharsTest.test(char) && !isZeroWidthJoiner(char));
-		if (hasReservedChars || hasControlChars) throw new Error("Replacement string cannot contain reserved filename characters");
-		string = string.normalize("NFC");
-		string = string.replaceAll(reUnicodeWhitespace, " ");
-		if (replacement.length > 0) string = string.replaceAll(reRepeatedReservedCharacters, "$1");
-		string = string.replace(reTrailingDotsAndSpaces, "");
-		string = string.replace(reRelativePath, replacement);
-		string = string.replace(filenameReservedRegex(), replacement);
-		string = string.replaceAll(reControlChars, (char) => isZeroWidthJoiner(char) ? char : replacement);
-		string = string.replace(reTrailingDotsAndSpaces, "");
-		if (string.length === 0) {
-			string = replacement.replace(reTrailingDotsAndSpaces, "");
-			if (string.length === 0 && replacement.length > 0) string = "!";
-		}
-		const allowedLength = typeof options.maxLength === "number" ? options.maxLength : MAX_FILENAME_LENGTH;
-		string = truncateFilename(string, allowedLength);
-		string = string.replace(reTrailingDotsAndSpaces, "");
-		if (windowsReservedNameRegex().test(string)) string += replacement;
-		return string;
-	}
-	function truncateByGraphemeBudget(input, budget) {
-		if (input.length <= budget) return input;
-		let count = 0;
-		let output = "";
-		for (const { segment } of getSegmenter().segment(input)) {
-			const next = count + segment.length;
-			if (next > budget) break;
-			output += segment;
-			count = next;
-		}
-		return output;
-	}
-	//#endregion
 	//#region src/core/common/functions.ts
 	/**
 	* Chromium uses `net::IsSafePortableRelativePath` — non-ASCII titles often fail on Windows;
@@ -22518,6 +22455,35 @@
 		if (options$1.removeSpecialCharacters) filename = filename.replace(RE_REMOVE_SPECIAL_FILENAME, options$1.replaceSpecialCharactersWith).replace(RE_WS_COLLAPSE, " ");
 		return filename.trim();
 	}
+	/** Short-side (or lone non-zero side) in pixels — used for sort, `720p` caption, and tier when `videoQuality` is absent. */
+	function downloadResolutionShortSide(d) {
+		const w = d.width ?? 0;
+		const h = d.height ?? 0;
+		if (w <= 0 && h <= 0) return 0;
+		if (w > 0 && h > 0) return Math.min(w, h);
+		return Math.max(w, h);
+	}
+	/** When `videoQuality` is absent (e.g. TikTok HTML parse), infer tier from `width` / `height`. */
+	function qualityLabelFromDownload(d) {
+		if (d.videoQuality?.label) return d.videoQuality.label;
+		const n = downloadResolutionShortSide(d);
+		if (!Number.isFinite(n) || n <= 0) return "hd";
+		if (n >= 2160) return "4k";
+		if (n >= 1080) return "1080";
+		if (n >= 720) return "hd";
+		return "sd";
+	}
+	function qualityBadgeText(label) {
+		if (label === "1080") return "HD";
+		return label;
+	}
+	/** Secondary line: `720p` from dimensions, else caption string. */
+	function downloadQualityCaption(d) {
+		if (d.type === "AudioOnly") return d.quality.split(" · ")[0]?.trim() || d.quality;
+		const n = downloadResolutionShortSide(d);
+		if (n > 0) return `${n}p`;
+		return d.quality;
+	}
 	/**
 	* @param page Runtime sender page namespace.
 	* @param url Source media URL.
@@ -22549,6 +22515,38 @@
 		});
 		if (response.error) throw new Error(response.message);
 	}
+	//#endregion
+	//#region src/core/common/helpers.ts
+	function urlMatchesTikTok(url) {
+		try {
+			const u = new URL(url);
+			if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+			return /tiktok\.com$/i.test(u.hostname);
+		} catch {
+			return false;
+		}
+	}
+	async function getActiveTab() {
+		const [tab] = await chrome.tabs.query({
+			active: true,
+			currentWindow: true
+		});
+		return tab ?? null;
+	}
+	function formatBytes(bytes) {
+		const sizes = [
+			"B",
+			"KB",
+			"MB",
+			"GB"
+		];
+		const i = Math.floor(Math.log(bytes) / Math.log(1024));
+		return bytes === 0 ? "0B" : `${Number.parseFloat((bytes / 1024 ** i).toFixed(1))}${sizes[i]}`;
+	}
+	//#endregion
+	//#region src/core/constants.ts
+	/** Content script endpoint for module runtime messages (must match `MODULE_NAME`). */
+	var CONTENT_MESSAGE_PAGE = `content/${MODULE_NAME}`;
 	//#endregion
 	//#region src/core/popup/popup.ts
 	async function mediaInfoFromTab(tabId, url) {

@@ -8,7 +8,7 @@ import { useVideoStore } from '@/app/popup/video-store';
 import {
     downloadResolutionShortSide,
     qualityLabelFromDownload,
-} from '@/core/common/download-quality-tier';
+} from '@/core/common/functions';
 import { __t } from '@/system/lib/i18n';
 import { cn } from '@/system/lib/utils';
 import DownloadItem from './DownloadItem';
